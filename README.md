@@ -2,23 +2,36 @@
 
 ## What's This?
 
-An asynchronous IO version of `TinyDB` based on `aiofiles`.
+"An asynchronous IO version of `TinyDB` based on `aiofiles`."
 
-Almost every methods are asynchronous. And it's based on `TinyDB 4.7.0+`.
+Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.  
+I will try to keep up with the latest version of `TinyDB`.
 
-Since I modified it in just few hours, I'm not sure if it's stable enough for production.
-So I haven't upload it to PyPI yet.
+Since I modified it in just a few hours, I'm not sure if it's stable enough for production.  
+But hey! It passed all the tests anyways.
 
-A few extra minor differences from the original `TinyDB`:
+## A few extra minor differences from the original `TinyDB`:
 
 * **lazy-load:** When access-mode is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
 * **ujson:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
 
-## How to use?
+## How to use IT?
 
-Basically all you need to do is inserting an `await` before every method that needs IO.
+#### Installation
 
-Notice that some parts of the code is blocking, for example when calling `len()` on `TinyDB` or `Table` Objects.
+```Bash
+pip install async-tinydb
+```
+
+#### Importing
+```Python
+from asynctinydb import TinyDB, where
+```
+
+
+Basically, all you need to do is insert an `await` before every method that needs IO.
+
+Notice that some parts of the code are blocking, for example when calling `len()` on `TinyDB` or `Table` Objects.
 
 ## Example Codes:
 

@@ -14,12 +14,8 @@ from .utils import with_typehint
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
-#TableBase: Type[Table] = with_typehint(Table)
-if TYPE_CHECKING:
-    class TableBase:
-        ...
-else:
-    TableBase = object
+TableBase: Type[Table] = with_typehint(Table)
+
 
 
 class TinyDB(TableBase):

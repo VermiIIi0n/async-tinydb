@@ -1,19 +1,18 @@
 [tool.poetry]
-name = "asynctinydb"
-version = "4.7.0"
-description = "TinyDB is a tiny, document oriented database optimized for your happiness :)"
-authors = ["Markus Siemens <markus@m-siemens.de>"]
+name = "async-tinydb"
+version = "1.0.0"
+description = "Yet Another Async TinyDB"
+authors = ["Markus Siemens <markus@m-siemens.de>", "VermiIIi0n"]
 license = "MIT"
 
-readme = "README.rst"
+readme = "README.md"
 
-homepage = "https://github.com/msiemens/tinydb"
-documentation = "https://tinydb.readthedocs.org/"
+homepage = "https://github.com/VermiIIi0n/async-tinydb"
 
-keywords = ["database", "nosql"]
+keywords = ["database", "nosql", "async"]
 
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
@@ -21,7 +20,6 @@ classifiers = [
     "Topic :: Database :: Database Engines/Servers",
     "Topic :: Utilities",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -37,12 +35,14 @@ packages = [
 ]
 
 [tool.poetry.urls]
-"Changelog" = "https://github.com/msiemens/tinydb/en/latest/changelog.html"
-"Issues" = "https://github.com/msiemens/tinydb/issues"
+"Issues" = "https://github.com/VermiIIi0n/async-tinydb/issues"
 
 [tool.poetry.dependencies]
-python = "^3.6"
-typing-extensions = { version = "^3.10.0 || ^4.0.0", python = "<=3.7" }
+python = "^3.7"
+typing-extensions = { version = "^3.10.0 || ^4.0.0", python = "<=3.10" }
+nest-asyncio = "^1.5.5"
+ujson = "^5.4.0"
+aiofiles = "^22.1.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
@@ -55,6 +55,7 @@ pyyaml = "^5.1.2"
 pytest-mypy = { version = "^0.8.1", markers = "platform_python_implementation != 'PyPy'" }
 types-PyYAML = "^5.4.3"
 typing-extensions = { version = "^3.10.0" }
+pytest-asyncio = "^0.19.0"
 
 [build-system]
 requires = ["poetry-core"]
