@@ -90,35 +90,35 @@ class CachingMiddleware(Middleware):
         self.cache = None
         self._cache_modified_count = 0
 
-    def read(self):
+    async def read(self):
         if self.cache is None:
             # Empty cache: read from the storage
-            self.cache = self.storage.read()
+            self.cache = await self.storage.read()
 
         # Return the cached data
         return self.cache
 
-    def write(self, data):
+    async def write(self, data):
         # Store data in cache
         self.cache = data
         self._cache_modified_count += 1
 
         # Check if we need to flush the cache
         if self._cache_modified_count >= self.WRITE_CACHE_SIZE:
-            self.flush()
+            await self.flush()
 
-    def flush(self):
+    async def flush(self):
         """
         Flush all unwritten data to disk.
         """
         if self._cache_modified_count > 0:
             # Force-flush the cache by writing the data to the storage
-            self.storage.write(self.cache)
+            await self.storage.write(self.cache)
             self._cache_modified_count = 0
 
-    def close(self):
+    async def close(self):
         # Flush potentially unwritten data
-        self.flush()
+        await self.flush()
 
         # Let the storage clean up too
-        self.storage.close()
+        await self.storage.close()

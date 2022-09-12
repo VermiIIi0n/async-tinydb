@@ -1,8 +1,12 @@
 """
 This module contains the main component of TinyDB: the database.
 """
-from typing import Dict, Iterator, Set, Type
 
+import asyncio
+from typing import TYPE_CHECKING, AsyncGenerator, Dict, Iterator, Set, Type
+
+import nest_asyncio
+nest_asyncio.apply()
 from . import JSONStorage
 from .storages import Storage
 from .table import Table, Document
@@ -10,7 +14,12 @@ from .utils import with_typehint
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
-TableBase: Type[Table] = with_typehint(Table)
+#TableBase: Type[Table] = with_typehint(Table)
+if TYPE_CHECKING:
+    class TableBase:
+        ...
+else:
+    TableBase = object
 
 
 class TinyDB(TableBase):
@@ -97,13 +106,14 @@ class TinyDB(TableBase):
         self._tables: Dict[str, Table] = {}
 
     def __repr__(self):
+        tables = asyncio.get_event_loop().run_until_complete(self.tables())
         args = [
-            'tables={}'.format(list(self.tables())),
-            'tables_count={}'.format(len(self.tables())),
+            'tables={}'.format(list(tables)),
+            'tables_count={}'.format(len(tables)),
             'default_table_documents_count={}'.format(self.__len__()),
             'all_tables_documents_count={}'.format(
                 ['{}={}'.format(table, len(self.table(table)))
-                 for table in self.tables()]),
+                 for table in tables]),
         ]
 
         return '<{} {}>'.format(type(self).__name__, ', '.join(args))
@@ -132,7 +142,7 @@ class TinyDB(TableBase):
 
         return table
 
-    def tables(self) -> Set[str]:
+    async def tables(self) -> Set[str]:
         """
         Get the names of all tables in the database.
 
@@ -158,22 +168,22 @@ class TinyDB(TableBase):
         # so we need to consider this case to and return an empty set in this
         # case.
 
-        return set(self.storage.read() or {})
+        return set((await self.storage.read()) or {})
 
-    def drop_tables(self) -> None:
+    async def drop_tables(self) -> None:
         """
         Drop all tables from the database. **CANNOT BE REVERSED!**
         """
 
         # We drop all tables from this database by writing an empty dict
         # to the storage thereby returning to the initial state with no tables.
-        self.storage.write({})
+        await self.storage.write({})
 
         # After that we need to remember to empty the ``_tables`` dict, so we'll
         # create new table instances when a table is accessed again.
         self._tables.clear()
 
-    def drop_table(self, name: str) -> None:
+    async def drop_table(self, name: str) -> None:
         """
         Drop a specific table from the database. **CANNOT BE REVERSED!**
 
@@ -185,7 +195,7 @@ class TinyDB(TableBase):
         if name in self._tables:
             del self._tables[name]
 
-        data = self.storage.read()
+        data = await self.storage.read()
 
         # The database is uninitialized, there's nothing to do
         if data is None:
@@ -199,7 +209,7 @@ class TinyDB(TableBase):
         del data[name]
 
         # Store the updated data back to the storage
-        self.storage.write(data)
+        await self.storage.write(data)
 
     @property
     def storage(self) -> Storage:
@@ -211,7 +221,7 @@ class TinyDB(TableBase):
         """
         return self._storage
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """
         Close the database.
 
@@ -227,9 +237,9 @@ class TinyDB(TableBase):
         Upon leaving this context, the ``close`` method will be called.
         """
         self._opened = False
-        self.storage.close()
+        await self.storage.close()
 
-    def __enter__(self):
+    async def __aenter__(self):
         """
         Use the database as a context manager.
 
@@ -241,12 +251,12 @@ class TinyDB(TableBase):
         """
         return self
 
-    def __exit__(self, *args):
+    async def __aexit__(self, *args):
         """
         Close the storage instance when leaving a context.
         """
         if self._opened:
-            self.close()
+            await self.close()
 
     def __getattr__(self, name):
         """
@@ -267,8 +277,8 @@ class TinyDB(TableBase):
         """
         return len(self.table(self.default_table_name))
 
-    def __iter__(self) -> Iterator[Document]:
+    def __aiter__(self) -> AsyncGenerator[Document, Document]:
         """
         Return an iterator for the default table's documents.
         """
-        return iter(self.table(self.default_table_name))
+        return self.table(self.default_table_name).__aiter__()

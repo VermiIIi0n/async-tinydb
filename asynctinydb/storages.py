@@ -4,13 +4,16 @@ implementations.
 """
 
 import io
-import json
+import ujson as json
 import os
+import asyncio
+from aiofiles import open as aopen
+import aiofiles.os as aos
+from aiofiles.threadpool.text import AsyncTextIOWrapper as AWrapper
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 
 __all__ = ('Storage', 'JSONStorage', 'MemoryStorage')
-
 
 def touch(path: str, create_dirs: bool):
     """
@@ -31,6 +34,25 @@ def touch(path: str, create_dirs: bool):
     with open(path, 'a'):
         pass
 
+async def atouch(path: str, create_dirs: bool):
+    """
+    Create a file if it doesn't exist yet.
+
+    :param path: The file to create.
+    :param create_dirs: Whether to create all missing parent directories.
+    """
+    if create_dirs:
+        base_dir = os.path.dirname(path)
+
+        # Check if we need to create missing parent directories
+        if not await aos.path.exists(base_dir):
+            await aos.makedirs(base_dir)
+
+    # Create the file by opening it in 'a' mode which creates the file if it
+    # does not exist yet but does not modify its contents
+    async with aopen(path, 'a'):
+        pass
+
 
 class Storage(ABC):
     """
@@ -44,7 +66,7 @@ class Storage(ABC):
     # implemented read and write
 
     @abstractmethod
-    def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
+    async def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
         """
         Read the current state.
 
@@ -56,7 +78,7 @@ class Storage(ABC):
         raise NotImplementedError('To be overridden!')
 
     @abstractmethod
-    def write(self, data: Dict[str, Dict[str, Any]]) -> None:
+    async def write(self, data: Dict[str, Dict[str, Any]]) -> None:
         """
         Write the current state of the database to the storage.
 
@@ -67,7 +89,7 @@ class Storage(ABC):
 
         raise NotImplementedError('To be overridden!')
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """
         Optional: Close open file handles, etc.
         """
@@ -102,16 +124,21 @@ class JSONStorage(Storage):
             touch(path, create_dirs=create_dirs)
 
         # Open the file for reading/writing
-        self._handle = open(path, mode=self._mode, encoding=encoding)
+        self._handle: AWrapper | None = None
+        self._path = path
+        self._encoding = encoding
 
-    def close(self) -> None:
-        self._handle.close()
+    async def close(self) -> None:
+        if self._handle is not None:
+            await self._handle.close()
 
-    def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
+    async def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        if self._handle is None:
+            self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         # Get the file size by moving the cursor to the file end and reading
         # its location
-        self._handle.seek(0, os.SEEK_END)
-        size = self._handle.tell()
+        await self._handle.seek(0, os.SEEK_END)
+        size = await self._handle.tell()
 
         if not size:
             # File is empty, so we return ``None`` so TinyDB can properly
@@ -119,31 +146,35 @@ class JSONStorage(Storage):
             return None
         else:
             # Return the cursor to the beginning of the file
-            self._handle.seek(0)
+            await self._handle.seek(0)
 
             # Load the JSON contents of the file
-            return json.load(self._handle)
+            raw = await self._handle.read()
+            return json.loads(raw)
 
-    def write(self, data: Dict[str, Dict[str, Any]]):
+    async def write(self, data: Dict[str, Dict[str, Any]]):
+        if self._handle is None:
+            self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         # Move the cursor to the beginning of the file just in case
-        self._handle.seek(0)
+        await self._handle.seek(0)
 
         # Serialize the database state using the user-provided arguments
         serialized = json.dumps(data, **self.kwargs)
 
         # Write the serialized data to the file
         try:
-            self._handle.write(serialized)
+            await self._handle.write(serialized)
         except io.UnsupportedOperation:
             raise IOError('Cannot write to the database. Access mode is "{0}"'.format(self._mode))
 
         # Ensure the file has been written
-        self._handle.flush()
-        os.fsync(self._handle.fileno())
+        await self._handle.flush()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, os.fsync, self._handle.fileno())
 
         # Remove data that is behind the new cursor in case the file has
         # gotten shorter
-        self._handle.truncate()
+        await self._handle.truncate()
 
 
 class MemoryStorage(Storage):
@@ -159,8 +190,8 @@ class MemoryStorage(Storage):
         super().__init__()
         self.memory = None
 
-    def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
+    async def read(self) -> Optional[Dict[str, Dict[str, Any]]]:
         return self.memory
 
-    def write(self, data: Dict[str, Dict[str, Any]]):
+    async def write(self, data: Dict[str, Dict[str, Any]]):
         self.memory = data

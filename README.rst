@@ -17,9 +17,17 @@ Quick Links
 Introduction
 ************
 
-TinyDB is a lightweight document oriented database optimized for your happiness :)
-It's written in pure Python and has no external dependencies. The target are
-small apps that would be blown away by a SQL-DB or an external database server.
+Async IO version of TinyDB based on `aiofiles`.
+
+Almost every methods are async. And it's newer than `aiotinydb`!
+
+Since I modified it in just few hours, I'm not sure if it's stable enough for production.
+So I haven't upload it to PyPI yet.
+
+A few extra minor differences from the original TinyDB:
+
+- **lazy-load:** When access-mode is set to 'r', FileNotExistsError is not raised until the first read operation.
+- **ujson:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
 
 TinyDB is:
 

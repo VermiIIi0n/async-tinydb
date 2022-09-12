@@ -131,7 +131,7 @@ class FrozenDict(dict):
     __setitem__ = _immutable
     __delitem__ = _immutable
     clear = _immutable
-    setdefault = _immutable
+    setdefault = _immutable  # type: ignore
     popitem = _immutable
 
     def update(self, e=None, **f):

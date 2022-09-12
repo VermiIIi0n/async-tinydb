@@ -2,10 +2,13 @@ import os.path
 import tempfile
 
 import pytest  # type: ignore
+import asyncio
 
-from tinydb.middlewares import CachingMiddleware
-from tinydb.storages import MemoryStorage
-from tinydb import TinyDB, JSONStorage
+import nest_asyncio
+nest_asyncio.apply()
+from asynctinydb.middlewares import CachingMiddleware
+from asynctinydb.storages import MemoryStorage
+from asynctinydb import TinyDB, JSONStorage
 
 
 @pytest.fixture(params=['memory', 'json'])
@@ -15,10 +18,10 @@ def db(request):
             db_ = TinyDB(os.path.join(tmpdir, 'test.db'), storage=JSONStorage)
         else:
             db_ = TinyDB(storage=MemoryStorage)
-
-        db_.drop_tables()
-        db_.insert_multiple({'int': 1, 'char': c} for c in 'abc')
-
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(db_.drop_tables())
+        loop.run_until_complete(db_.insert_multiple({'int': 1, 'char': c} for c in 'abc'))
+        
         yield db_
 
 

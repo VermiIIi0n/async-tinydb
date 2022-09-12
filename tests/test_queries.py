@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from tinydb.queries import Query, where
+from asynctinydb.queries import Query, where
 
 
 def test_no_path():

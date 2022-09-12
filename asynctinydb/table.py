@@ -3,11 +3,12 @@ This module implements tables, the central place for accessing and manipulating
 data in TinyDB.
 """
 
+import asyncio
 from typing import (
+    AsyncGenerator,
     Callable,
     Dict,
     Iterable,
-    Iterator,
     List,
     Mapping,
     Optional,
@@ -15,7 +16,8 @@ from typing import (
     cast,
     Tuple
 )
-
+import nest_asyncio
+nest_asyncio.apply()
 from .queries import QueryLike
 from .storages import Storage
 from .utils import LRUCache
@@ -134,7 +136,7 @@ class Table:
         """
         return self._storage
 
-    def insert(self, document: Mapping) -> int:
+    async def insert(self, document: Mapping) -> int:
         """
         Insert a new document into the table.
 
@@ -156,7 +158,7 @@ class Table:
             self._next_id = None
         else:
             # In all other cases we use the next free ID
-            doc_id = self._get_next_id()
+            doc_id = await self._get_next_id()
 
         # Now, we update the table and add the document
         def updater(table: dict):
@@ -170,11 +172,11 @@ class Table:
             table[doc_id] = dict(document)
 
         # See below for details on ``Table._update``
-        self._update_table(updater)
+        await self._update_table(updater)
 
         return doc_id
 
-    def insert_multiple(self, documents: Iterable[Mapping]) -> List[int]:
+    async def insert_multiple(self, documents: Iterable[Mapping]) -> List[int]:
         """
         Insert multiple documents into the table.
 
@@ -209,16 +211,17 @@ class Table:
                 # Generate new document ID for this document
                 # Store the doc_id, so we can return all document IDs
                 # later, then save the document with the new doc_id
-                doc_id = self._get_next_id()
+                loop = asyncio.get_event_loop()
+                doc_id = loop.run_until_complete(self._get_next_id())
                 doc_ids.append(doc_id)
                 table[doc_id] = dict(document)
 
         # See below for details on ``Table._update``
-        self._update_table(updater)
+        await self._update_table(updater)
 
         return doc_ids
 
-    def all(self) -> List[Document]:
+    async def all(self) -> List[Document]:
         """
         Get all documents stored in the table.
 
@@ -230,9 +233,9 @@ class Table:
         # of all documents by using the ``list`` constructor to perform the
         # conversion.
 
-        return list(iter(self))
+        return [i async for i in self]
 
-    def search(self, cond: QueryLike) -> List[Document]:
+    async def search(self, cond: QueryLike) -> List[Document]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -251,7 +254,7 @@ class Table:
         # to the document class and document ID class.
         docs = [
             self.document_class(doc, self.document_id_class(doc_id))
-            for doc_id, doc in self._read_table().items()
+            for doc_id, doc in (await self._read_table()).items()
             if cond(doc)
         ]
 
@@ -276,7 +279,7 @@ class Table:
 
         return docs
 
-    def get(
+    async def get(
         self,
         cond: Optional[QueryLike] = None,
         doc_id: Optional[int] = None,
@@ -294,7 +297,7 @@ class Table:
 
         if doc_id is not None:
             # Retrieve a document specified by its ID
-            table = self._read_table()
+            table = await self._read_table()
             raw_doc = table.get(str(doc_id), None)
 
             if raw_doc is None:
@@ -309,7 +312,7 @@ class Table:
             # doesn't think that `doc_id_` (which is a string) needs
             # to have the same type as `doc_id` which is this function's
             # parameter and is an optional `int`.
-            for doc_id_, doc in self._read_table().items():
+            for doc_id_, doc in (await self._read_table()).items():
                 if cond(doc):
                     return self.document_class(
                         doc,
@@ -320,7 +323,7 @@ class Table:
 
         raise RuntimeError('You have to pass either cond or doc_id')
 
-    def contains(
+    async def contains(
         self,
         cond: Optional[QueryLike] = None,
         doc_id: Optional[int] = None
@@ -336,15 +339,15 @@ class Table:
         """
         if doc_id is not None:
             # Documents specified by ID
-            return self.get(doc_id=doc_id) is not None
+            return (await self.get(doc_id=doc_id)) is not None
 
         elif cond is not None:
             # Document specified by condition
-            return self.get(cond) is not None
+            return (await self.get(cond)) is not None
 
         raise RuntimeError('You have to pass either cond or doc_id')
 
-    def update(
+    async def update(
         self,
         fields: Union[Mapping, Callable[[Mapping], None]],
         cond: Optional[QueryLike] = None,
@@ -383,7 +386,7 @@ class Table:
                     perform_update(table, doc_id)
 
             # Perform the update operation (see _update_table for details)
-            self._update_table(updater)
+            await self._update_table(updater)
 
             return updated_ids
 
@@ -412,7 +415,7 @@ class Table:
                         perform_update(table, doc_id)
 
             # Perform the update operation (see _update_table for details)
-            self._update_table(updater)
+            await self._update_table(updater)
 
             return updated_ids
 
@@ -431,11 +434,11 @@ class Table:
                     perform_update(table, doc_id)
 
             # Perform the update operation (see _update_table for details)
-            self._update_table(updater)
+            await self._update_table(updater)
 
             return updated_ids
 
-    def update_multiple(
+    async def update_multiple(
         self,
         updates: Iterable[
             Tuple[Union[Mapping, Callable[[Mapping], None]], QueryLike]
@@ -483,11 +486,11 @@ class Table:
                         perform_update(fields, table, doc_id)
 
         # Perform the update operation (see _update_table for details)
-        self._update_table(updater)
+        await self._update_table(updater)
 
         return updated_ids
 
-    def upsert(self, document: Mapping, cond: Optional[QueryLike] = None) -> List[int]:
+    async def upsert(self, document: Mapping, cond: Optional[QueryLike] = None) -> List[int]:
         """
         Update documents, if they exist, insert them otherwise.
 
@@ -515,7 +518,7 @@ class Table:
 
         # Perform the update operation
         try:
-            updated_docs: Optional[List[int]] = self.update(document, cond, doc_ids)
+            updated_docs: Optional[List[int]] = await self.update(document, cond, doc_ids)
         except KeyError:
             # This happens when a doc_id is specified, but it's missing
             updated_docs = None
@@ -526,9 +529,9 @@ class Table:
 
         # There are no documents that match the specified query -> insert the
         # data as a new document
-        return [self.insert(document)]
+        return [await self.insert(document)]
 
-    def remove(
+    async def remove(
         self,
         cond: Optional[QueryLike] = None,
         doc_ids: Optional[Iterable[int]] = None,
@@ -555,7 +558,7 @@ class Table:
                     table.pop(doc_id)
 
             # Perform the remove operation
-            self._update_table(updater)
+            await self._update_table(updater)
 
             return removed_ids
 
@@ -585,31 +588,31 @@ class Table:
                         table.pop(doc_id)
 
             # Perform the remove operation
-            self._update_table(updater)
+            await self._update_table(updater)
 
             return removed_ids
 
         raise RuntimeError('Use truncate() to remove all documents')
 
-    def truncate(self) -> None:
+    async def truncate(self) -> None:
         """
         Truncate the table by removing all documents.
         """
 
         # Update the table by resetting all data
-        self._update_table(lambda table: table.clear())
+        await self._update_table(lambda table: table.clear())
 
         # Reset document ID counter
         self._next_id = None
 
-    def count(self, cond: QueryLike) -> int:
+    async def count(self, cond: QueryLike) -> int:
         """
         Count the documents matching a query.
 
         :param cond: the condition use
         """
 
-        return len(self.search(cond))
+        return len(await self.search(cond))
 
     def clear_cache(self) -> None:
         """
@@ -622,10 +625,11 @@ class Table:
         """
         Count the total number of documents in this table.
         """
+        loop = asyncio.get_event_loop()
+        table = loop.run_until_complete(self._read_table())
+        return len(table)
 
-        return len(self._read_table())
-
-    def __iter__(self) -> Iterator[Document]:
+    async def __aiter__(self) -> AsyncGenerator[Document, Document]:
         """
         Iterate over all documents stored in the table.
 
@@ -633,11 +637,11 @@ class Table:
         """
 
         # Iterate all documents and their IDs
-        for doc_id, doc in self._read_table().items():
+        for doc_id, doc in (await self._read_table()).items():
             # Convert documents to the document class
             yield self.document_class(doc, self.document_id_class(doc_id))
 
-    def _get_next_id(self):
+    async def _get_next_id(self):
         """
         Return the ID for a newly inserted document.
         """
@@ -653,7 +657,7 @@ class Table:
         # of the current table documents
 
         # Read the table documents
-        table = self._read_table()
+        table = await self._read_table()
 
         # If the table is empty, set the initial ID
         if not table:
@@ -672,7 +676,7 @@ class Table:
 
         return next_id
 
-    def _read_table(self) -> Dict[str, Mapping]:
+    async def _read_table(self) -> Dict[str, Mapping]:
         """
         Read the table data from the underlying storage.
 
@@ -682,7 +686,7 @@ class Table:
         """
 
         # Retrieve the tables from the storage
-        tables = self._storage.read()
+        tables = await self._storage.read()
 
         if tables is None:
             # The database is empty
@@ -697,7 +701,7 @@ class Table:
 
         return table
 
-    def _update_table(self, updater: Callable[[Dict[int, Mapping]], None]):
+    async def _update_table(self, updater: Callable[[Dict[int, Mapping]], None]):
         """
         Perform a table update operation.
 
@@ -711,7 +715,7 @@ class Table:
         document class, as the table data will *not* be returned to the user.
         """
 
-        tables = self._storage.read()
+        tables = await self._storage.read()
 
         if tables is None:
             # The database is empty
@@ -744,7 +748,7 @@ class Table:
         }
 
         # Write the newly updated data back to the storage
-        self._storage.write(tables)
+        await self._storage.write(tables)
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()

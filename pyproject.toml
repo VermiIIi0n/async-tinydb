@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "tinydb"
+name = "asynctinydb"
 version = "4.7.0"
 description = "TinyDB is a tiny, document oriented database optimized for your happiness :)"
 authors = ["Markus Siemens <markus@m-siemens.de>"]
@@ -33,7 +33,7 @@ classifiers = [
 ]
 
 packages = [
-    { include = "tinydb" }
+    { include = "asynctinydb" }
 ]
 
 [tool.poetry.urls]

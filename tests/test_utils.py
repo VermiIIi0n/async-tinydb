@@ -1,6 +1,6 @@
 import pytest
 
-from tinydb.utils import LRUCache, freeze, FrozenDict
+from asynctinydb.utils import LRUCache, freeze, FrozenDict
 
 
 def test_lru_cache():
