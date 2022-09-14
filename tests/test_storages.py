@@ -279,3 +279,40 @@ async def test_encoding(tmpdir):
 
     jap_storage = JSONStorage(path, encoding="cp936")
     assert japanese_doc == await jap_storage.read()
+
+@pytest.mark.asyncio
+async def test_storage_event_hooks(tmpdir):
+    data = {"ab": 42}
+
+    path = str(tmpdir.join('test.db'))
+    storage = JSONStorage(path)
+    @storage.on.write.pre
+    async def mul(ev: str, s: Storage, d: dict):
+        d["ab"] *= 2  # should change 'ab' to 84
+    @storage.on.write.post  # Make sure returning None won't overwrite the data
+    async def no_return(*args):
+        ...
+    await storage.write(data)
+    await storage.close()
+
+    class EXC(Exception):
+        ...
+    with pytest.raises(EXC):
+        storage = JSONStorage(path)
+        @storage.on.read.pre
+        async def r(*arg):
+            raise EXC()
+        await storage.read()
+
+    storage = JSONStorage(path)
+    @storage.on.read.post
+    async def subs(ev: str, s: Storage, d: dict):
+        d["ab"] -= 2  # should change 'ab' to 82
+    assert {"ab": 82} == await storage.read()
+
+    storage.event_hook.clear_actions()
+    
+    @storage.on.read.pre
+    async def inject(ev, s, str):
+        return "{\"ab\": 114}"
+    assert {"ab": 114} == await storage.read()

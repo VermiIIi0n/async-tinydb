@@ -19,6 +19,14 @@ class Middleware:
         self._storage_cls = storage_cls
         self.storage = None
 
+    @property
+    def on(self):
+        return self.storage.on
+
+    @property
+    def event_hook(self):
+        return self.storage.event_hook
+
     def __call__(self, *args, **kwargs):
         """
         Create the storage instance and store it as self.storage.

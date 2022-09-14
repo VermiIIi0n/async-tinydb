@@ -3,7 +3,7 @@ This module contains the main component of TinyDB: the database.
 """
 
 import asyncio
-from typing import TYPE_CHECKING, AsyncGenerator, Dict, Iterator, Set, Type
+from typing import AsyncGenerator, Dict, Set, Type
 
 import nest_asyncio
 nest_asyncio.apply()

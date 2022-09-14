@@ -2,7 +2,6 @@ import re
 from collections.abc import Mapping
 
 import pytest
-import asyncio
 import nest_asyncio
 nest_asyncio.apply()
 

@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.0.0"
+version = "1.1.1"
 description = "Yet Another Async TinyDB"
-authors = ["Markus Siemens <markus@m-siemens.de>", "VermiIIi0n"]
+authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
 
 readme = "README.md"
@@ -20,7 +20,6 @@ classifiers = [
     "Topic :: Database :: Database Engines/Servers",
     "Topic :: Utilities",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -38,7 +37,7 @@ packages = [
 "Issues" = "https://github.com/VermiIIi0n/async-tinydb/issues"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.8"
 typing-extensions = { version = "^3.10.0 || ^4.0.0", python = "<=3.10" }
 nest-asyncio = "^1.5.5"
 ujson = "^5.4.0"

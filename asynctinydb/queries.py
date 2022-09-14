@@ -15,17 +15,13 @@ True
 >>> q({'val': 1})
 False
 """
-
+from __future__ import annotations
 import re
-import sys
-from typing import Mapping, Tuple, Callable, Any, Union, List, Optional
+from typing import Mapping, Tuple, Callable, Any
 
 from .utils import freeze
 
-if sys.version_info >= (3, 8):
-    from typing import Protocol
-else:
-    from typing_extensions import Protocol
+from typing import Protocol
 
 __all__ = ('Query', 'QueryLike', 'where')
 
@@ -75,7 +71,7 @@ class QueryInstance:
     instance can be used as a key in a dictionary.
     """
 
-    def __init__(self, test: Callable[[Mapping], bool], hashval: Optional[Tuple]):
+    def __init__(self, test: Callable[[Mapping], bool], hashval: Tuple | None):
         self._test = test
         self._hash = hashval
 
@@ -98,7 +94,7 @@ class QueryInstance:
         return hash(self._hash)
 
     def __repr__(self):
-        return 'QueryImpl{}'.format(self._hash)
+        return f"QueryImpl{self._hash}"
 
     def __eq__(self, other: object):
         if isinstance(other, QueryInstance):
@@ -108,27 +104,27 @@ class QueryInstance:
 
     # --- Query modifiers -----------------------------------------------------
 
-    def __and__(self, other: 'QueryInstance') -> 'QueryInstance':
+    def __and__(self, other: QueryInstance) -> QueryInstance:
         # We use a frozenset for the hash as the AND operation is commutative
         # (a & b == b & a) and the frozenset does not consider the order of
         # elements
+        hashval = None
         if self.is_cacheable() and other.is_cacheable():
             hashval = ('and', frozenset([self._hash, other._hash]))
-        else:
-            hashval = None
+
         return QueryInstance(lambda value: self(value) and other(value), hashval)
 
-    def __or__(self, other: 'QueryInstance') -> 'QueryInstance':
+    def __or__(self, other: QueryInstance) -> QueryInstance:
         # We use a frozenset for the hash as the OR operation is commutative
         # (a | b == b | a) and the frozenset does not consider the order of
         # elements
+        hashval = None
         if self.is_cacheable() and other.is_cacheable():
             hashval = ('or', frozenset([self._hash, other._hash]))
-        else:
-            hashval = None
+
         return QueryInstance(lambda value: self(value) or other(value), hashval)
 
-    def __invert__(self) -> 'QueryInstance':
+    def __invert__(self) -> QueryInstance:
         hashval = ('not', self._hash) if self.is_cacheable() else None
         return QueryInstance(lambda value: not self(value), hashval)
 
@@ -168,7 +164,7 @@ class Query(QueryInstance):
 
     def __init__(self) -> None:
         # The current path of fields to access when evaluating the object
-        self._path: Tuple[Union[str, Callable], ...] = ()
+        self._path: Tuple[str | Callable, ...] = ()
 
         # Prevent empty queries to be evaluated
         def notest(_):
@@ -180,7 +176,7 @@ class Query(QueryInstance):
         )
 
     def __repr__(self):
-        return '{}()'.format(type(self).__name__)
+        return f"{type(self).__name__}()"
 
     def __hash__(self):
         return super().__hash__()
@@ -396,7 +392,7 @@ class Query(QueryInstance):
             ('test', self._path, func, args)
         )
 
-    def any(self, cond: Union[QueryInstance, List[Any]]) -> QueryInstance:
+    def any(self, cond: QueryInstance | list[Any]) -> QueryInstance:
         """
         Check if a condition is met by any document in a list,
         where a condition can also be a sequence (e.g. list).
@@ -431,7 +427,7 @@ class Query(QueryInstance):
             ('any', self._path, freeze(cond))
         )
 
-    def all(self, cond: Union['QueryInstance', List[Any]]) -> QueryInstance:
+    def all(self, cond: QueryInstance | list[Any]) -> QueryInstance:
         """
         Check if a condition is met by all documents in a list,
         where a condition can also be a sequence (e.g. list).
@@ -464,7 +460,7 @@ class Query(QueryInstance):
             ('all', self._path, freeze(cond))
         )
 
-    def one_of(self, items: List[Any]) -> QueryInstance:
+    def one_of(self, items: list[Any]) -> QueryInstance:
         """
         Check if the value is contained in a list or generator.
 
