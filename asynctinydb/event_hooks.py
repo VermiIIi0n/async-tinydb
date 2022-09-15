@@ -177,9 +177,6 @@ class EventHook(dict[str, ActionChain]):
             raise AttributeError(f"Event '{event}' not found, add it first")
         return super().__getitem__(event)
 
-    def __getattr__(self, event: str) -> ActionChain:
-        return self[event]
-
 
 class AsyncActionChain(ActionChain[AsyncActionVar]):
     """

@@ -3,9 +3,14 @@ Utility functions.
 """
 
 from __future__ import annotations
+import inspect
+import asyncio
+from contextvars import copy_context
+from functools import wraps, partial
 from collections import OrderedDict, abc
 from typing import List, Iterator, TypeVar, Generic, Union, Optional, Type, \
-    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload
+    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload, Awaitable, \
+    Generator, AsyncGenerator
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -36,6 +41,63 @@ def with_typehint(baseclass: Type[T]):
 
     # Otherwise: just inherit from `object` like a regular Python class
     return object
+
+def sync_await(coro: Awaitable[Any], loop: asyncio.AbstractEventLoop) -> Any:
+    fut = asyncio.run_coroutine_threadsafe(coro, loop)
+    return fut.result()
+
+def ensure_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
+    if asyncio.iscoroutinefunction(func):
+        return func
+    else:
+        return to_async(func)
+
+#### quart.utils ####
+
+def to_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
+    """Ensure that the sync function is run within the event loop.
+    If the *func* is not a coroutine it will be wrapped such that
+    it runs in the default executor (use loop.set_default_executor
+    to change). This ensures that synchronous functions do not
+    block the event loop.
+    """
+
+    @wraps(func)
+    async def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, copy_context().run, partial(func, *args, **kwargs)
+        )
+        if inspect.isgenerator(result):
+            return to_async_iter(result)
+        else:
+            return result
+
+    return _wrapper
+
+
+def to_async_iter(iterable: Generator[Any, None, None]) -> AsyncGenerator[Any, None]:
+    async def _gen_wrapper() -> AsyncGenerator[Any, None]:
+        # Wrap the generator such that each iteration runs
+        # in the executor. Then rationalise the raised
+        # errors so that it ends.
+        def _inner() -> Any:
+            # https://bugs.python.org/issue26221
+            # StopIteration errors are swallowed by the
+            # run_in_exector method
+            try:
+                return next(iterable)
+            except StopIteration as e:
+                raise StopAsyncIteration() from e
+
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                yield await loop.run_in_executor(None, copy_context().run, _inner)
+            except StopAsyncIteration:
+                return
+
+    return _gen_wrapper()
 
 
 class LRUCache(abc.MutableMapping, Generic[K, V]):

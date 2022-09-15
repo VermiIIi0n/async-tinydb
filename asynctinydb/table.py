@@ -3,7 +3,6 @@ This module implements tables, the central place for accessing and manipulating
 data in TinyDB.
 """
 
-import asyncio
 from typing import (
     AsyncGenerator,
     Callable,
@@ -16,11 +15,12 @@ from typing import (
     cast,
     Tuple
 )
+import asyncio
 import nest_asyncio
-nest_asyncio.apply()
 from .queries import QueryLike
 from .storages import Storage
 from .utils import LRUCache
+nest_asyncio.apply()
 
 __all__ = ('Document', 'Table')
 

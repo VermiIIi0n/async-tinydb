@@ -313,6 +313,6 @@ async def test_storage_event_hooks(tmpdir):
     storage.event_hook.clear_actions()
     
     @storage.on.read.pre
-    async def inject(ev, s, str):
+    async def inject(ev, s, string):
         return "{\"ab\": 114}"
     assert {"ab": 114} == await storage.read()

@@ -8,8 +8,8 @@ import ujson as json
 import os
 import asyncio
 from aiofiles import open as aopen
-import aiofiles.os as aos
-from aiofiles.threadpool.text import AsyncTextIOWrapper as AWrapper
+from aiofiles.threadpool.text import AsyncTextIOWrapper as TWrapper
+from aiofiles.threadpool.binary import AsyncFileIO as BWrapper
 from .event_hooks import EventHook, AsyncActionChain, EventHint
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Awaitable, TypeVar
@@ -134,7 +134,7 @@ class JSONStorage(Storage):
             touch(path, create_dirs=create_dirs)
 
         # Open the file for reading/writing
-        self._handle: AWrapper | None = None
+        self._handle: TWrapper|BWrapper|None = None
         self._path = path
         self._encoding = encoding
 
@@ -165,7 +165,7 @@ class JSONStorage(Storage):
             pre = await self._event_hook.aemit('read.pre', self, raw)
             if pre and pre[0] is not None:
                 raw = pre[0]
-            data = json.loads(raw)
+            data = json.loads(raw or "{}")
             await self._event_hook.aemit('read.post', self, data)
             return data
 
@@ -178,16 +178,16 @@ class JSONStorage(Storage):
         # Trigger write events
         await self._event_hook.aemit('write.pre', self, data)
         # Serialize the database state using the user-provided arguments
-        serialized = json.dumps(data, **self.kwargs)
+        serialized: bytes|str = json.dumps(data or {}, **self.kwargs)
         if 'b' in self._mode:
-            serialized = serialized.encode(self._encoding)
+            serialized = serialized.encode()  # type: ignore
         post = await self._event_hook.aemit('write.post', self, serialized)
         if post and post[0] is not None:  # if action returned something
             serialized = post[0]
 
         # Write the serialized data to the file
         try:
-            await self._handle.write(serialized)
+            await self._handle.write(serialized)  # type: ignore
         except io.UnsupportedOperation:
             raise IOError(f"Cannot write to the database. Access mode is '{self._mode}'")
 
@@ -230,30 +230,26 @@ class _write_hint(EventHint):
     @property
     def pre(self) -> Callable[[_W], _W]:
         """Action Type: (event_name: str, Storage, data: dict[str, dict[str, Any]]) -> None"""
-        return self._chain.pre
     @property
     def post(self) -> Callable[[_R], _R]:
         """Action Type: (event_name: str, Storage, data: str|bytes) -> str|bytes|None"""
-        return self._chain.post
 class _read_hint(EventHint):
     @property
     def pre(self) -> Callable[[_R], _R]:
         """Action Type: (event_name: str, Storage, data: str|bytes) -> str|bytes|None"""
-        return self._chain.pre
     @property
     def post(self) -> Callable[[_W], _W]:
         """Action Type: (event_name: str, Storage, data: dict[str, dict[str, Any]]) -> None"""
-        return self._chain.post
 class StorageHints(EventHint):
     """
     Event hints for the storage class.
     """
     @property
     def write(self) -> _write_hint:
-        return self._chain.write
+        return self._chain.write  # type: ignore
     @property
     def read(self) -> _read_hint:
-        return self._chain.read
+        return self._chain.read  # type: ignore
     @property
     def close(self) -> Callable[[_C], _C]:
         return self._chain.close
