@@ -316,3 +316,14 @@ async def test_storage_event_hooks(tmpdir):
     async def inject(ev, s, string):
         return "{\"ab\": 114}"
     assert {"ab": 114} == await storage.read()
+
+    # Test that this event hook has a function limit of 1
+    with pytest.raises(RuntimeError):
+        @storage.on.read.pre
+        async def r(*arg):
+            ...
+    # Should raise an error because this event doesn't exist
+    with pytest.raises(AttributeError):
+        @storage.on.read.not_a_event
+        async def r(*arg):
+            ...

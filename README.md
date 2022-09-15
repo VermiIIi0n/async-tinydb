@@ -14,6 +14,8 @@ But hey! It passed all the tests anyways.
 * **asynchronous** Say goodbye to blocking IO.
 * **drop support** Only supports Python 3.8+.
 * **event hooks** You can now use event hooks to do something before or after an operation. see [Event Hooks](#event-hooks) for more details.
+* **redesigned id** Now the ID class is more abstract. You can use your own ID class to replace the default one in a more pleasing way.
+  As long as it is inherited from `asynctinydb.table.BaseID`. The default one is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 
 ## Minor differences from the original `TinyDB`:
 

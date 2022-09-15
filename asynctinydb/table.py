@@ -3,26 +3,105 @@ This module implements tables, the central place for accessing and manipulating
 data in TinyDB.
 """
 
+from __future__ import annotations
+from abc import ABC, abstractmethod
 from typing import (
+    TYPE_CHECKING,
     AsyncGenerator,
     Callable,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Union,
     cast,
-    Tuple
+    TypeVar,
 )
 import asyncio
 import nest_asyncio
 from .queries import QueryLike
 from .storages import Storage
-from .utils import LRUCache
+from .utils import LRUCache, ensure_async
 nest_asyncio.apply()
 
 __all__ = ('Document', 'Table')
+IDVar = TypeVar('IDVar', bound="BaseID")
+
+class BaseID(ABC):
+    @abstractmethod
+    def __init__(self: IDVar, value: str|IDVar):
+        super().__init__()
+    @abstractmethod
+    def __str__(self) -> str:
+        raise NotImplementedError()
+    @abstractmethod
+    def __hash__(self) -> int:
+        raise NotImplementedError()
+    @abstractmethod
+    def __eq__(self, other: object) -> bool:
+        raise NotImplementedError()
+    @classmethod
+    @abstractmethod
+    def next_id(cls, table: Table):
+        """Get the next ID for the given table. Can be defined as an async func."""
+        raise NotImplementedError()
+    @classmethod
+    @abstractmethod
+    def mark_exists(cls, table: Table, new_id):
+        """Mark the given id as existing. Can be defined as an async func."""
+        raise NotImplementedError()
+    @classmethod
+    @abstractmethod
+    def clear_cache(cls, table: Table):
+        """Clear the ID cache for a table. CANNOT be defined as an async func."""
+        raise NotImplementedError()
+
+
+class IncreID(BaseID, int):
+    """ID class using incrementing integers."""
+    _cache: dict[str, int] = {}
+    def __init__(self, value: str|int|IncreID):
+        self._value = int(value)
+    def __str__(self) -> str:
+        return str(self._value)
+    def __int__(self) -> int:
+        return self._value
+    def __hash__(self) -> int:
+        return self._value
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, IncreID):
+            return self._value == other._value
+        elif isinstance(other, (int, float)):
+            return self._value == other
+        return False
+    @classmethod
+    async def next_id(cls, table: Table) -> IncreID:
+        # If we already know the next ID
+        if cls._cache.get(table.name, None) is not None:
+            new = cls(cls._cache[table.name])
+            cls._cache[table.name] += 1
+            return new
+
+        # Read the table documents
+        docs = await table._read_table()
+
+        # If the table is empty, set the initial ID
+        if not docs:
+            next_id = 1
+            cls._cache[table.name] = next_id + 1
+            return cls(next_id)
+
+        # Determine the next ID based on the maximum ID that's currently in use
+        max_id = max(int(i) for i in docs.keys())
+        next_id = max_id + 1
+
+        # The next ID we wil return AFTER this call needs to be larger than
+        # the current next ID we calculated
+        cls._cache[table.name] = next_id + 1
+        return cls(next_id)
+    @classmethod
+    def mark_exists(cls, table: Table, new_id: IncreID):
+        cls._cache[table.name] = max(cls._cache.get(table.name, 0), int(new_id) + 1)
+    @classmethod
+    def clear_cache(cls, table: Table):
+        cls._cache.pop(table.name, None)
 
 
 class Document(dict):
@@ -33,7 +112,7 @@ class Document(dict):
     its ID using ``doc.doc_id``.
     """
 
-    def __init__(self, value: Mapping, doc_id: int):
+    def __init__(self, value: Mapping, doc_id: BaseID):
         super().__init__(value)
         self.doc_id = doc_id
 
@@ -84,7 +163,7 @@ class Table:
     #: The class used to represent a document ID
     #:
     #: .. versionadded:: 4.0
-    document_id_class = int
+    # document_id_class = IncreID  # moved to __init__
 
     #: The class used for caching query results
     #:
@@ -100,27 +179,29 @@ class Table:
         self,
         storage: Storage,
         name: str,
-        cache_size: int = default_query_cache_capacity
+        cache_size: int = default_query_cache_capacity,
+        document_id_class: type[BaseID] = IncreID,
     ):
         """
         Create a table instance.
         """
 
+        self.document_id_class = document_id_class
         self._storage = storage
         self._name = name
-        self._query_cache: LRUCache[QueryLike, List[Document]] \
+        self._query_cache: LRUCache[QueryLike, list[Document]] \
             = self.query_cache_class(capacity=cache_size)
 
-        self._next_id = None
+        self.document_id_class.clear_cache(self)  # clear the ID cache
 
     def __repr__(self):
         args = [
-            'name={!r}'.format(self.name),
-            'total={}'.format(len(self)),
-            'storage={}'.format(self._storage),
+            f"name='{self.name}'",
+            f"total={len(self)}",
+            f"storage={self._storage}",
         ]
 
-        return '<{} {}>'.format(type(self).__name__, ', '.join(args))
+        return f"<{type(self).__name__} {', '.join(args)}>"
 
     @property
     def name(self) -> str:
@@ -136,7 +217,7 @@ class Table:
         """
         return self._storage
 
-    async def insert(self, document: Mapping) -> int:
+    async def insert(self, document: Mapping) -> BaseID:
         """
         Insert a new document into the table.
 
@@ -155,7 +236,9 @@ class Table:
 
             # We also reset the stored next ID so the next insert won't
             # re-use document IDs by accident when storing an old value
-            self._next_id = None
+            if TYPE_CHECKING:
+                assert(isinstance(doc_id, self.document_id_class))
+            await ensure_async(self.document_id_class.mark_exists)(self, doc_id)
         else:
             # In all other cases we use the next free ID
             doc_id = await self._get_next_id()
@@ -176,7 +259,7 @@ class Table:
 
         return doc_id
 
-    async def insert_multiple(self, documents: Iterable[Mapping]) -> List[int]:
+    async def insert_multiple(self, documents: Iterable[Mapping]) -> list[BaseID]:
         """
         Insert multiple documents into the table.
 
@@ -221,7 +304,7 @@ class Table:
 
         return doc_ids
 
-    async def all(self) -> List[Document]:
+    async def all(self) -> list[Document]:
         """
         Get all documents stored in the table.
 
@@ -235,7 +318,7 @@ class Table:
 
         return [i async for i in self]
 
-    async def search(self, cond: QueryLike) -> List[Document]:
+    async def search(self, cond: QueryLike) -> list[Document]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -281,9 +364,9 @@ class Table:
 
     async def get(
         self,
-        cond: Optional[QueryLike] = None,
-        doc_id: Optional[int] = None,
-    ) -> Optional[Document]:
+        cond: QueryLike = None,
+        doc_id: BaseID = None,
+    ) -> Document|None:
         """
         Get exactly one document specified by a query or a document ID.
 
@@ -325,8 +408,8 @@ class Table:
 
     async def contains(
         self,
-        cond: Optional[QueryLike] = None,
-        doc_id: Optional[int] = None
+        cond: QueryLike = None,
+        doc_id: BaseID = None
     ) -> bool:
         """
         Check whether the database contains a document matching a query or
@@ -349,10 +432,10 @@ class Table:
 
     async def update(
         self,
-        fields: Union[Mapping, Callable[[Mapping], None]],
-        cond: Optional[QueryLike] = None,
-        doc_ids: Optional[Iterable[int]] = None,
-    ) -> List[int]:
+        fields: Mapping|Callable[[Mapping], None],
+        cond: QueryLike = None,
+        doc_ids: Iterable[BaseID] = None,
+    ) -> list[BaseID]:
         """
         Update all matching documents to have a given set of fields.
 
@@ -441,9 +524,9 @@ class Table:
     async def update_multiple(
         self,
         updates: Iterable[
-            Tuple[Union[Mapping, Callable[[Mapping], None]], QueryLike]
+            tuple[Mapping | Callable[[Mapping], None], QueryLike]
         ],
-    ) -> List[int]:
+    ) -> list[BaseID]:
         """
         Update all matching documents to have a given set of fields.
 
@@ -490,7 +573,7 @@ class Table:
 
         return updated_ids
 
-    async def upsert(self, document: Mapping, cond: Optional[QueryLike] = None) -> List[int]:
+    async def upsert(self, document: Mapping, cond: QueryLike = None) -> list[BaseID]:
         """
         Update documents, if they exist, insert them otherwise.
 
@@ -506,7 +589,7 @@ class Table:
 
         # Extract doc_id
         if isinstance(document, Document) and hasattr(document, 'doc_id'):
-            doc_ids: Optional[List[int]] = [document.doc_id]
+            doc_ids: list[BaseID] | None = [document.doc_id]
         else:
             doc_ids = None
 
@@ -518,7 +601,7 @@ class Table:
 
         # Perform the update operation
         try:
-            updated_docs: Optional[List[int]] = await self.update(document, cond, doc_ids)
+            updated_docs: list[BaseID] | None = await self.update(document, cond, doc_ids)
         except KeyError:
             # This happens when a doc_id is specified, but it's missing
             updated_docs = None
@@ -533,9 +616,9 @@ class Table:
 
     async def remove(
         self,
-        cond: Optional[QueryLike] = None,
-        doc_ids: Optional[Iterable[int]] = None,
-    ) -> List[int]:
+        cond: QueryLike = None,
+        doc_ids: Iterable[BaseID] = None,
+    ) -> list[BaseID]:
         """
         Remove all matching documents.
 
@@ -603,7 +686,7 @@ class Table:
         await self._update_table(lambda table: table.clear())
 
         # Reset document ID counter
-        self._next_id = None
+        self.document_id_class.clear_cache(self)
 
     async def count(self, cond: QueryLike) -> int:
         """
@@ -646,37 +729,13 @@ class Table:
         Return the ID for a newly inserted document.
         """
 
-        # If we already know the next ID
-        if self._next_id is not None:
-            next_id = self._next_id
-            self._next_id = next_id + 1
-
-            return next_id
-
-        # Determine the next document ID by finding out the max ID value
-        # of the current table documents
-
-        # Read the table documents
-        table = await self._read_table()
-
-        # If the table is empty, set the initial ID
-        if not table:
-            next_id = 1
-            self._next_id = next_id + 1
-
-            return next_id
-
-        # Determine the next ID based on the maximum ID that's currently in use
-        max_id = max(self.document_id_class(i) for i in table.keys())
-        next_id = max_id + 1
-
-        # The next ID we wil return AFTER this call needs to be larger than
-        # the current next ID we calculated
-        self._next_id = next_id + 1
+        # Determine the next document ID by calling self.document_class.next_id()
+        # Make sure it doesn't block the event loop
+        next_id = await ensure_async(self.document_id_class.next_id)(self)
 
         return next_id
 
-    async def _read_table(self) -> Dict[str, Mapping]:
+    async def _read_table(self) -> dict[str, Mapping]:
         """
         Read the table data from the underlying storage.
 
@@ -701,7 +760,7 @@ class Table:
 
         return table
 
-    async def _update_table(self, updater: Callable[[Dict[int, Mapping]], None]):
+    async def _update_table(self, updater: Callable[[dict[BaseID, Mapping]], None]):
         """
         Perform a table update operation.
 
@@ -737,7 +796,7 @@ class Table:
         }
 
         # Perform the table update operation
-        updater(table)
+        updater(table)  # type: ignore
 
         # Convert the document IDs back to strings.
         # This is required as some storages (most notably the JSON file format)

@@ -35,15 +35,6 @@ def touch(path: str, create_dirs: bool):
     with open(path, 'a'):
         pass
 
-class StorageEventHook(EventHook):
-    def __init__(self):
-        super().__init__()
-        self.hook('write.pre', AsyncActionChain())
-        self.hook('write.post', AsyncActionChain(limit=1))
-        self.hook('read.pre', AsyncActionChain(limit=1))
-        self.hook('read.post', AsyncActionChain())
-        self.hook('close', AsyncActionChain())
-
 
 class Storage(ABC):
     """
@@ -58,8 +49,8 @@ class Storage(ABC):
 
     def __init__(self):
         # Create event hook
-        self._event_hook = StorageEventHook()
-        self._on = StorageHints(self._event_hook)
+        self._event_hook = EventHook()
+        self._on = EventHint(self._event_hook)
 
     @property
     def on(self) -> StorageHints:
@@ -69,7 +60,7 @@ class Storage(ABC):
         return self._on
 
     @property
-    def event_hook(self) -> StorageEventHook:
+    def event_hook(self) -> EventHook:
         """
         The event hook for this storage.
         """
@@ -138,6 +129,14 @@ class JSONStorage(Storage):
         self._path = path
         self._encoding = encoding
 
+        # Initialize event hooks
+        self.event_hook.hook('write.pre', AsyncActionChain())
+        self.event_hook.hook('write.post', AsyncActionChain(limit=1))
+        self.event_hook.hook('read.pre', AsyncActionChain(limit=1))
+        self.event_hook.hook('read.post', AsyncActionChain())
+        self.event_hook.hook('close', AsyncActionChain())
+        self._on = StorageHints(self._event_hook)  # Add hints for event hooks
+
     async def close(self) -> None:
         await self._event_hook.aemit('close', self)
         if self._handle is not None:
@@ -170,6 +169,7 @@ class JSONStorage(Storage):
             return data
 
     async def write(self, data: dict[str, dict[str, Any]]):
+        data = data.copy()
         if self._handle is None:
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         # Move the cursor to the beginning of the file just in case

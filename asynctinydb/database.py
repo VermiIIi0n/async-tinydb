@@ -6,11 +6,11 @@ import asyncio
 from typing import AsyncGenerator, Dict, Set, Type
 
 import nest_asyncio
-nest_asyncio.apply()
 from . import JSONStorage
 from .storages import Storage
 from .table import Table, Document
 from .utils import with_typehint
+nest_asyncio.apply()  # Allow nested event loops
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
