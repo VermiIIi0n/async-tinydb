@@ -14,14 +14,19 @@ But hey! It passed all the tests anyways.
 * **asynchronous** Say goodbye to blocking IO.
 * **drop support** Only supports Python 3.8+.
 * **event hooks** You can now use event hooks to do something before or after an operation. see [Event Hooks](#event-hooks) for more details.
-* **redesigned id** Now the ID class is more abstract. You can use your own ID class to replace the default one in a more pleasing way.
-  As long as it is inherited from `asynctinydb.table.BaseID`. The default one is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
+* **redesigned id & doc class** Now the ID class and Document class are more abstract. You can use your own class to replace the default ones in a more pleasing way.
+  As long as they are inherited from `asynctinydb.table.BaseID/BaseDocument`. The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 
 ## Minor differences from the original `TinyDB`:
 
 * **lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
+
 * **ujson:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
   Why not `orjson`? Because `ujson` is fast enough and has more features.
+  
+* **Storage `closed` property** Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError` will be raised.
+  
+  I strongly suggest doing the same for `middleware`.
 
 ## How to use it?
 

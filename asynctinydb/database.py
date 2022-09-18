@@ -2,15 +2,12 @@
 This module contains the main component of TinyDB: the database.
 """
 
-import asyncio
 from typing import AsyncGenerator, Dict, Set, Type
 
-import nest_asyncio
 from . import JSONStorage
 from .storages import Storage
 from .table import Table, Document
-from .utils import with_typehint
-nest_asyncio.apply()  # Allow nested event loops
+from .utils import with_typehint, sync_await
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
@@ -102,17 +99,16 @@ class TinyDB(TableBase):
         self._tables: Dict[str, Table] = {}
 
     def __repr__(self):
-        tables = asyncio.get_event_loop().run_until_complete(self.tables())
+        tables = sync_await(self.tables())
         args = [
-            'tables={}'.format(list(tables)),
-            'tables_count={}'.format(len(tables)),
-            'default_table_documents_count={}'.format(self.__len__()),
-            'all_tables_documents_count={}'.format(
-                ['{}={}'.format(table, len(self.table(table)))
-                 for table in tables]),
+            f"tables={list(tables)}",
+            f"tables_count={len(tables)}",
+            f"default_table_documents_count={self.__len__()}",
+            "all_tables_documents_count={}".format(
+            [f'{table}={len(self.table(table))}' for table in tables]),
         ]
 
-        return '<{} {}>'.format(type(self).__name__, ', '.join(args))
+        return f"<{type(self).__name__} {', '.join(args)}>"
 
     def table(self, name: str, **kwargs) -> Table:
         """
@@ -130,6 +126,8 @@ class TinyDB(TableBase):
         :param kwargs: Keyword arguments to pass to the table class constructor
         """
 
+        if not self._opened:
+            raise IOError('Database is closed')
         if name in self._tables:
             return self._tables[name]
 
@@ -163,6 +161,8 @@ class TinyDB(TableBase):
         # Storage.read() may return ``None`` if the database file is empty,
         # so we need to consider this case to and return an empty set in this
         # case.
+        if not self._opened:
+            raise IOError('Database is closed')
 
         return set((await self.storage.read()) or {})
 
@@ -170,6 +170,9 @@ class TinyDB(TableBase):
         """
         Drop all tables from the database. **CANNOT BE REVERSED!**
         """
+
+        if not self._opened:
+            raise IOError('Database is closed')
 
         # We drop all tables from this database by writing an empty dict
         # to the storage thereby returning to the initial state with no tables.
@@ -185,6 +188,9 @@ class TinyDB(TableBase):
 
         :param name: The name of the table to drop.
         """
+
+        if not self._opened:
+            raise IOError('Database is closed')
 
         # If the table is currently opened, we need to forget the table class
         # instance
@@ -227,8 +233,8 @@ class TinyDB(TableBase):
         To ensure this method is called, the TinyDB instance can be used as a
         context manager::
 
-            with TinyDB('data.json') as db:
-                db.insert({'foo': 'bar'})
+            async with TinyDB('data.json') as db:
+                await db.insert({'foo': 'bar'})
 
         Upon leaving this context, the ``close`` method will be called.
         """

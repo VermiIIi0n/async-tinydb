@@ -59,8 +59,8 @@ class QueryInstance:
     A query instance.
 
     This is the object on which the actual query operations are performed. The
-    :class:`~tinydb.queries.Query` class acts like a query builder and
-    generates :class:`~tinydb.queries.QueryInstance` objects which will
+    :class:`~asynctinydb.queries.Query` class acts like a query builder and
+    generates :class:`~asynctinydb.queries.QueryInstance` objects which will
     evaluate their query against a given document when called.
 
     Query instances can be combined using logical OR and AND and inverted using
@@ -139,12 +139,12 @@ class Query(QueryInstance):
     1) ORM-like usage:
 
     >>> User = Query()
-    >>> db.search(User.name == 'John Doe')
-    >>> db.search(User['logged-in'] == True)
+    >>> await db.search(User.name == 'John Doe')
+    >>> await db.search(User['logged-in'] == True)
 
     2) Classical usage:
 
-    >>> db.search(where('value') == True)
+    >>> await db.search(where('value') == True)
 
     Note that ``where(...)`` is a shorthand for ``Query(...)`` allowing for
     a more fluent syntax.
@@ -153,9 +153,9 @@ class Query(QueryInstance):
     binary AND and OR operators:
 
     >>> # Binary AND:
-    >>> db.search((where('field1').exists()) & (where('field2') == 5))
+    >>> await db.search((where('field1').exists()) & (where('field2') == 5))
     >>> # Binary OR:
-    >>> db.search((where('field1').exists()) | (where('field2') == 5))
+    >>> await db.search((where('field1').exists()) | (where('field2') == 5))
 
     Queries are executed by calling the resulting object. They expect to get
     the document to test as the first argument and return ``True`` or
@@ -218,7 +218,7 @@ class Query(QueryInstance):
 
         :param test: The test the query executes.
         :param hashval: The hash of the query.
-        :return: A :class:`~tinydb.queries.QueryInstance` object
+        :return: A :class:`~asynctinydb.queries.QueryInstance` object
         """
         if not self._path and not allow_empty_path:
             raise ValueError('Query has no path')

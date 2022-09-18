@@ -5,6 +5,7 @@ Utility functions.
 from __future__ import annotations
 import inspect
 import asyncio
+import nest_asyncio
 from contextvars import copy_context
 from functools import wraps, partial
 from collections import OrderedDict, abc
@@ -42,9 +43,10 @@ def with_typehint(baseclass: Type[T]):
     # Otherwise: just inherit from `object` like a regular Python class
     return object
 
-def sync_await(coro: Awaitable[Any], loop: asyncio.AbstractEventLoop) -> Any:
-    fut = asyncio.run_coroutine_threadsafe(coro, loop)
-    return fut.result()
+def sync_await(coro: Awaitable[Any], loop: asyncio.AbstractEventLoop=None) -> Any:
+    loop = loop or asyncio.get_event_loop()
+    nest_asyncio.apply(loop)
+    return loop.run_until_complete(coro)
 
 def ensure_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     if asyncio.iscoroutinefunction(func):

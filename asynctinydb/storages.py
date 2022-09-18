@@ -66,6 +66,15 @@ class Storage(ABC):
         """
         return self._event_hook
 
+    @property
+    @abstractmethod
+    def closed(self) -> bool:
+        """
+        Whether the storage is closed.
+        """
+
+        pass
+
     @abstractmethod
     async def read(self) -> dict[str, dict[str, Any]] | None:
         """
@@ -137,6 +146,10 @@ class JSONStorage(Storage):
         self.event_hook.hook('close', AsyncActionChain())
         self._on = StorageHints(self._event_hook)  # Add hints for event hooks
 
+    @property
+    def closed(self) -> bool:
+        return self._handle is not None and self._handle.closed
+
     async def close(self) -> None:
         await self._event_hook.aemit('close', self)
         if self._handle is not None:
@@ -147,6 +160,8 @@ class JSONStorage(Storage):
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         # Get the file size by moving the cursor to the file end and reading
         # its location
+        if self._handle.closed:
+            raise IOError('File is closed')
         await self._handle.seek(0, os.SEEK_END)
         size = await self._handle.tell()
 
@@ -172,6 +187,8 @@ class JSONStorage(Storage):
         data = data.copy()
         if self._handle is None:
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
+        if self._handle.closed:
+            raise IOError('File is closed')
         # Move the cursor to the beginning of the file just in case
         await self._handle.seek(0)
 
@@ -214,6 +231,10 @@ class MemoryStorage(Storage):
         super().__init__()
         self.memory = None
 
+    @property
+    def closed(self) -> bool:
+        return False
+
     async def read(self) -> dict[str, dict[str, Any]] | None:
         return self.memory
 
@@ -224,7 +245,7 @@ class MemoryStorage(Storage):
 ############# Event Hints #############
 
 _W = TypeVar('_W', bound=Callable[[str, Storage, dict[str, dict[str, Any]]], Awaitable[None]])
-_R = TypeVar('_R', bound=Callable[[str, Storage, str|bytes], Awaitable[str|bytes|None]])
+_R = TypeVar('_R', bound=Callable[[str, Storage, Any], Awaitable[Any|None]])
 _C = TypeVar('_C', bound=Callable[[str, Storage], Awaitable[None]])
 class _write_hint(EventHint):
     @property

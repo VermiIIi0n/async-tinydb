@@ -1,7 +1,8 @@
 """
-Contains the :class:`base class <tinydb.middlewares.Middleware>` for
+Contains the :class:`base class <asynctinydb.middlewares.Middleware>` for
 middlewares and implementations.
 """
+from .storages import Storage
 
 
 class Middleware:
@@ -17,7 +18,7 @@ class Middleware:
 
     def __init__(self, storage_cls):
         self._storage_cls = storage_cls
-        self.storage = None
+        self.storage: Storage = None
 
     @property
     def on(self):
@@ -107,6 +108,8 @@ class CachingMiddleware(Middleware):
         return self.cache
 
     async def write(self, data):
+        if self.storage.closed:
+            raise IOError('Storage is closed')
         # Store data in cache
         self.cache = data
         self._cache_modified_count += 1

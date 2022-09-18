@@ -12,8 +12,8 @@ Usage example:
 >>> from tinydb import TinyDB, where
 >>> from tinydb.storages import MemoryStorage
 >>> db = TinyDB(storage=MemoryStorage)
->>> db.insert({'data': 5})  # Insert into '_default' table
->>> db.search(where('data') == 5)
+>>> await db.insert({'data': 5})  # Insert into '_default' table
+>>> await db.search(where('data') == 5)
 [{'data': 5, '_id': 1}]
 >>> # Now let's create a new table
 >>> tbl = db.table('our_table')

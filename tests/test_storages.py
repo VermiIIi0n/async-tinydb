@@ -163,6 +163,10 @@ async def test_read_once():
         def __init__(self):
             self.memory = None
 
+        @property
+        def closed(self):
+            return False
+
         async def read(self):
             nonlocal count
             count += 1
@@ -194,6 +198,10 @@ async def test_read_once():
 @pytest.mark.asyncio
 async def test_custom_with_exception():
     class MyStorage(Storage):
+        @property
+        def closed(self):
+            return False
+
         async def read(self):
             pass
 
@@ -232,6 +240,10 @@ async def test_yaml(tmpdir):
         def __init__(self, filename):
             self.filename = filename
             touch(filename, False)
+
+        @property
+        def closed(self):
+            return False
 
         async def read(self):
             with open(self.filename) as handle:
@@ -327,3 +339,13 @@ async def test_storage_event_hooks(tmpdir):
         @storage.on.read.not_a_event
         async def r(*arg):
             ...
+
+@pytest.mark.asyncio
+async def test_file_closed():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage = JSONStorage(os.path.join(tmpdir,'test.json'))
+        await storage.read()
+        await storage.close()
+        assert storage._handle.closed
+        with pytest.raises(IOError):
+            await storage.read()

@@ -8,21 +8,23 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     AsyncGenerator,
+    overload,
     Callable,
     Iterable,
     Mapping,
+    Generic,
     cast,
     TypeVar,
+    Type,
+    Any
 )
-import asyncio
-import nest_asyncio
 from .queries import QueryLike
 from .storages import Storage
-from .utils import LRUCache, ensure_async
-nest_asyncio.apply()
+from .utils import LRUCache, ensure_async, sync_await
 
-__all__ = ('Document', 'Table')
+__all__ = ('Document', 'Table', 'BaseID', 'IncreID', 'BaseDocument')
 IDVar = TypeVar('IDVar', bound="BaseID")
+DocVar = TypeVar('DocVar', bound="BaseDocument")
 
 class BaseID(ABC):
     @abstractmethod
@@ -74,7 +76,7 @@ class IncreID(BaseID, int):
     @classmethod
     async def next_id(cls, table: Table) -> IncreID:
         # If we already know the next ID
-        if cls._cache.get(table.name, None) is not None:
+        if table.name in cls._cache:
             new = cls(cls._cache[table.name])
             cls._cache[table.name] += 1
             return new
@@ -104,7 +106,17 @@ class IncreID(BaseID, int):
         cls._cache.pop(table.name, None)
 
 
-class Document(dict):
+class BaseDocument(Mapping[IDVar, Any]):
+    @property
+    @abstractmethod
+    def doc_id(self) -> IDVar:
+        raise NotImplementedError()
+    @doc_id.setter
+    def doc_id(self, value: IDVar):
+        raise NotImplementedError()
+
+
+class Document(dict, BaseDocument[IDVar]):
     """
     A document stored in the database.
 
@@ -112,12 +124,19 @@ class Document(dict):
     its ID using ``doc.doc_id``.
     """
 
-    def __init__(self, value: Mapping, doc_id: BaseID):
+    def __init__(self, value: Mapping, doc_id: IDVar):
         super().__init__(value)
         self.doc_id = doc_id
 
+    @property
+    def doc_id(self) -> IDVar:
+        return self._doc_id
+    @doc_id.setter
+    def doc_id(self, value: IDVar):
+        self._doc_id = value
 
-class Table:
+
+class Table(Generic[IDVar, DocVar]):
     """
     Represents a single TinyDB table.
 
@@ -158,7 +177,7 @@ class Table:
     #: The class used to represent documents
     #:
     #: .. versionadded:: 4.0
-    document_class = Document
+    # document_class = Document
 
     #: The class used to represent a document ID
     #:
@@ -174,22 +193,40 @@ class Table:
     #:
     #: .. versionadded:: 4.0
     default_query_cache_capacity = 10
-
+    # A stupid workaround for mypy
+    @overload
+    def __init__(self:Table[IncreID, Document], storage: Storage, name: str, 
+                cache_size: int = default_query_cache_capacity): ...
+    @overload
+    def __init__(self: Table[IncreID, DocVar], storage: Storage, name: str,
+        cache_size: int = default_query_cache_capacity,*, document_class: Type[DocVar]): ...
+    @overload
+    def __init__(self: Table[IDVar, Document], storage: Storage, name: str,
+        cache_size: int = default_query_cache_capacity,*, document_id_class: Type[IDVar]): ...
+    @overload
+    def __init__(self: Table[IDVar, DocVar], storage: Storage, name: str,
+        cache_size: int = default_query_cache_capacity,
+        *, document_id_class: Type[IDVar], document_class: Type[DocVar],
+    ):
+        ...
     def __init__(
         self,
         storage: Storage,
         name: str,
         cache_size: int = default_query_cache_capacity,
-        document_id_class: type[BaseID] = IncreID,
+        *,
+        document_id_class = IncreID,
+        document_class = Document,
     ):
         """
         Create a table instance.
         """
 
         self.document_id_class = document_id_class
+        self.document_class = document_class
         self._storage = storage
         self._name = name
-        self._query_cache: LRUCache[QueryLike, list[Document]] \
+        self._query_cache: LRUCache[QueryLike, list[DocVar]] \
             = self.query_cache_class(capacity=cache_size)
 
         self.document_id_class.clear_cache(self)  # clear the ID cache
@@ -217,7 +254,7 @@ class Table:
         """
         return self._storage
 
-    async def insert(self, document: Mapping) -> BaseID:
+    async def insert(self, document: Mapping) -> IDVar:
         """
         Insert a new document into the table.
 
@@ -230,7 +267,7 @@ class Table:
             raise ValueError('Document is not a Mapping')
 
         # First, we get the document ID for the new document
-        if isinstance(document, Document):
+        if isinstance(document, self.document_class):
             # For a `Document` object we use the specified ID
             doc_id = document.doc_id
 
@@ -259,7 +296,7 @@ class Table:
 
         return doc_id
 
-    async def insert_multiple(self, documents: Iterable[Mapping]) -> list[BaseID]:
+    async def insert_multiple(self, documents: Iterable[Mapping]) -> list[IDVar]:
         """
         Insert multiple documents into the table.
 
@@ -275,7 +312,7 @@ class Table:
                 if not isinstance(document, Mapping):
                     raise ValueError('Document is not a Mapping')
 
-                if isinstance(document, Document):
+                if isinstance(document, self.document_class):
                     # Check if document does not override an existing document
                     if document.doc_id in table:
                         raise ValueError(
@@ -294,8 +331,7 @@ class Table:
                 # Generate new document ID for this document
                 # Store the doc_id, so we can return all document IDs
                 # later, then save the document with the new doc_id
-                loop = asyncio.get_event_loop()
-                doc_id = loop.run_until_complete(self._get_next_id())
+                doc_id = sync_await(self._get_next_id())
                 doc_ids.append(doc_id)
                 table[doc_id] = dict(document)
 
@@ -304,7 +340,7 @@ class Table:
 
         return doc_ids
 
-    async def all(self) -> list[Document]:
+    async def all(self) -> list[DocVar]:
         """
         Get all documents stored in the table.
 
@@ -318,7 +354,7 @@ class Table:
 
         return [i async for i in self]
 
-    async def search(self, cond: QueryLike) -> list[Document]:
+    async def search(self, cond: QueryLike) -> list[DocVar]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -365,8 +401,8 @@ class Table:
     async def get(
         self,
         cond: QueryLike = None,
-        doc_id: BaseID = None,
-    ) -> Document|None:
+        doc_id: IDVar = None,
+    ) -> DocVar|None:
         """
         Get exactly one document specified by a query or a document ID.
 
@@ -409,7 +445,7 @@ class Table:
     async def contains(
         self,
         cond: QueryLike = None,
-        doc_id: BaseID = None
+        doc_id: IDVar = None
     ) -> bool:
         """
         Check whether the database contains a document matching a query or
@@ -434,8 +470,8 @@ class Table:
         self,
         fields: Mapping|Callable[[Mapping], None],
         cond: QueryLike = None,
-        doc_ids: Iterable[BaseID] = None,
-    ) -> list[BaseID]:
+        doc_ids: Iterable[IDVar] = None,
+    ) -> list[IDVar]:
         """
         Update all matching documents to have a given set of fields.
 
@@ -526,7 +562,7 @@ class Table:
         updates: Iterable[
             tuple[Mapping | Callable[[Mapping], None], QueryLike]
         ],
-    ) -> list[BaseID]:
+    ) -> list[IDVar]:
         """
         Update all matching documents to have a given set of fields.
 
@@ -573,7 +609,7 @@ class Table:
 
         return updated_ids
 
-    async def upsert(self, document: Mapping, cond: QueryLike = None) -> list[BaseID]:
+    async def upsert(self, document: Mapping, cond: QueryLike = None) -> list[IDVar]:
         """
         Update documents, if they exist, insert them otherwise.
 
@@ -588,8 +624,8 @@ class Table:
         """
 
         # Extract doc_id
-        if isinstance(document, Document) and hasattr(document, 'doc_id'):
-            doc_ids: list[BaseID] | None = [document.doc_id]
+        if isinstance(document, self.document_class) and hasattr(document, 'doc_id'):
+            doc_ids: list[IDVar] | None = [document.doc_id]
         else:
             doc_ids = None
 
@@ -601,7 +637,7 @@ class Table:
 
         # Perform the update operation
         try:
-            updated_docs: list[BaseID] | None = await self.update(document, cond, doc_ids)
+            updated_docs: list[IDVar] | None = await self.update(document, cond, doc_ids)
         except KeyError:
             # This happens when a doc_id is specified, but it's missing
             updated_docs = None
@@ -617,8 +653,8 @@ class Table:
     async def remove(
         self,
         cond: QueryLike = None,
-        doc_ids: Iterable[BaseID] = None,
-    ) -> list[BaseID]:
+        doc_ids: Iterable[IDVar] = None,
+    ) -> list[IDVar]:
         """
         Remove all matching documents.
 
@@ -708,11 +744,10 @@ class Table:
         """
         Count the total number of documents in this table.
         """
-        loop = asyncio.get_event_loop()
-        table = loop.run_until_complete(self._read_table())
+        table = sync_await(self._read_table())
         return len(table)
 
-    async def __aiter__(self) -> AsyncGenerator[Document, Document]:
+    async def __aiter__(self) -> AsyncGenerator[DocVar, DocVar]:
         """
         Iterate over all documents stored in the table.
 
@@ -760,7 +795,7 @@ class Table:
 
         return table
 
-    async def _update_table(self, updater: Callable[[dict[BaseID, Mapping]], None]):
+    async def _update_table(self, updater: Callable[[dict[IDVar, Mapping]], None]):
         """
         Perform a table update operation.
 
@@ -796,7 +831,7 @@ class Table:
         }
 
         # Perform the table update operation
-        updater(table)  # type: ignore
+        updater(table)
 
         # Convert the document IDs back to strings.
         # This is required as some storages (most notably the JSON file format)
