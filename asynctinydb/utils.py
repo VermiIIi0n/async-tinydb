@@ -43,18 +43,20 @@ def with_typehint(baseclass: Type[T]):
     # Otherwise: just inherit from `object` like a regular Python class
     return object
 
-def sync_await(coro: Awaitable[Any], loop: asyncio.AbstractEventLoop=None) -> Any:
+
+def sync_await(coro: Awaitable[V], loop: asyncio.AbstractEventLoop = None) -> V:
     loop = loop or asyncio.get_event_loop()
     nest_asyncio.apply(loop)
     return loop.run_until_complete(coro)
 
+
 def ensure_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     if asyncio.iscoroutinefunction(func):
         return func
-    else:
-        return to_async(func)
+    return to_async(func)
 
 #### quart.utils ####
+
 
 def to_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     """Ensure that the sync function is run within the event loop.
@@ -72,8 +74,7 @@ def to_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
         )
         if inspect.isgenerator(result):
             return to_async_iter(result)
-        else:
-            return result
+        return result
 
     return _wrapper
 
@@ -190,7 +191,8 @@ class FrozenDict(dict):
         # Calculate the has by hashing a tuple of all dict items
         return hash(tuple(sorted(self.items())))
 
-    def _immutable(self, *args, **kws):
+    @staticmethod
+    def _immutable(*args, **kws):
         raise TypeError('object is immutable')
 
     # Disable write access to the dict
@@ -220,9 +222,8 @@ def freeze(obj):
     elif isinstance(obj, set):
         # Transform sets into ``frozenset``s
         return frozenset(obj)
-    else:
-        # Don't handle all other objects
-        return obj
+    return obj
+
 
 class StrChain(Sequence[str]):
     """
@@ -253,10 +254,11 @@ class StrChain(Sequence[str]):
     ```
     And much more...
     """
+
     def __init__(
             self: S,
             it: Iterable[str] | None = None,
-            joint: str ='.',
+            joint: str = '.',
             callback: Callable[..., Any] = str,
             **kw):
         """
@@ -283,7 +285,7 @@ class StrChain(Sequence[str]):
     def __getattr__(self: S, name: str) -> S:
         if name.startswith('_'):
             raise AttributeError(
-                f"{name} : String can't start with '_' when using __getattr__"+
+                f"{name} : String can't start with '_' when using __getattr__" +
                 " , use __getitem__ instead")
         return self.__create(self._list + [name])
 
@@ -309,11 +311,11 @@ class StrChain(Sequence[str]):
         raise TypeError(f"Invalid type {type(value)}")
 
     def __eq__(self, other) -> bool:
-        if type(other) == type(self):
+        if type(other) is type(self):
             return self._list == other._list \
-                    and self._joint == other._joint \
-                    and self._callback == other._callback \
-                    and self._kw == other._kw
+                and self._joint == other._joint \
+                and self._callback == other._callback \
+                and self._kw == other._kw
         return False
 
     def __hash__(self: S) -> int:

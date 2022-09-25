@@ -189,11 +189,11 @@ async def test_read_once():
 
         await db.insert({'foo': 'bar'})
 
-        assert count == 3  # One for getting the next ID, one for the insert
+        assert count == 2 # One for all(), one for the insert
 
         await db.all()
 
-        assert count == 4
+        assert count == 2 # Using cached data, no extra read
 
 @pytest.mark.asyncio
 async def test_custom_with_exception():
@@ -251,6 +251,9 @@ async def test_yaml(tmpdir):
                 return data
 
         async def write(self, data):
+            data = {k: ({str(_id): v for _id, v in tab.items()} 
+                    if hasattr(tab, "items") else tab) 
+                for k, tab in data.items()}
             with open(self.filename, 'w') as handle:
                 yaml.dump(data, handle)
 

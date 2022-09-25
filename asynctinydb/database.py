@@ -14,7 +14,6 @@ from .utils import with_typehint, sync_await
 TableBase: Type[Table] = with_typehint(Table)
 
 
-
 class TinyDB(TableBase):
     """
     The main class of TinyDB.
@@ -104,8 +103,7 @@ class TinyDB(TableBase):
             f"tables={list(tables)}",
             f"tables_count={len(tables)}",
             f"default_table_documents_count={self.__len__()}",
-            "all_tables_documents_count={}".format(
-            [f'{table}={len(self.table(table))}' for table in tables]),
+            f"all_tables_documents_count={[f'{table}={len(self.table(table))}' for table in tables]}",
         ]
 
         return f"<{type(self).__name__} {', '.join(args)}>"
@@ -177,6 +175,10 @@ class TinyDB(TableBase):
         # We drop all tables from this database by writing an empty dict
         # to the storage thereby returning to the initial state with no tables.
         await self.storage.write({})
+
+        # Clear in ram cache
+        for tab in self._tables.values():
+            tab.clear_data_cache()
 
         # After that we need to remember to empty the ``_tables`` dict, so we'll
         # create new table instances when a table is accessed again.
@@ -279,7 +281,7 @@ class TinyDB(TableBase):
         """
         return len(self.table(self.default_table_name))
 
-    def __aiter__(self) -> AsyncGenerator[Document, Document]:
+    def __aiter__(self) -> AsyncGenerator[Document, None]:
         """
         Return an iterator for the default table's documents.
         """

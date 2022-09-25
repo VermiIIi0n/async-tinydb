@@ -12,9 +12,10 @@ from aiofiles.threadpool.text import AsyncTextIOWrapper as TWrapper
 from aiofiles.threadpool.binary import AsyncFileIO as BWrapper
 from .event_hooks import EventHook, AsyncActionChain, EventHint
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Awaitable, TypeVar
+from typing import Any, Callable, Awaitable, Mapping, TypeVar
 
 __all__ = ('Storage', 'JSONStorage', 'MemoryStorage')
+
 
 def touch(path: str, create_dirs: bool):
     """
@@ -73,10 +74,8 @@ class Storage(ABC):
         Whether the storage is closed.
         """
 
-        pass
-
     @abstractmethod
-    async def read(self) -> dict[str, dict[str, Any]] | None:
+    async def read(self) -> dict[str, Mapping[str, Mapping]] | None:
         """
         Read the current state.
 
@@ -88,7 +87,7 @@ class Storage(ABC):
         raise NotImplementedError('To be overridden!')
 
     @abstractmethod
-    async def write(self, data: dict[str, dict[str, Any]]) -> None:
+    async def write(self, data: dict[str, Mapping[Any, Mapping]]) -> None:
         """
         Write the current state of the database to the storage.
 
@@ -103,8 +102,6 @@ class Storage(ABC):
         """
         Optional: Close open file handles, etc.
         """
-
-        pass
 
 
 class JSONStorage(Storage):
@@ -130,11 +127,11 @@ class JSONStorage(Storage):
 
         # Create the file if it doesn't exist and creating is allowed by the
         # access mode
-        if any([character in self._mode for character in ('+', 'w', 'a')]):  # any of the writing modes
+        if any(character in self._mode for character in ('+', 'w', 'a')):  # any of the writing modes
             touch(path, create_dirs=create_dirs)
 
         # Open the file for reading/writing
-        self._handle: TWrapper|BWrapper|None = None
+        self._handle: TWrapper | BWrapper | None = None
         self._path = path
         self._encoding = encoding
 
@@ -155,7 +152,7 @@ class JSONStorage(Storage):
         if self._handle is not None:
             await self._handle.close()
 
-    async def read(self) -> dict[str, dict[str, Any]] | None:
+    async def read(self) -> dict[str, Mapping[str, Mapping]] | None:
         if self._handle is None:
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         # Get the file size by moving the cursor to the file end and reading
@@ -169,22 +166,24 @@ class JSONStorage(Storage):
             # File is empty, so we return ``None`` so TinyDB can properly
             # initialize the database
             return None
-        else:
-            # Return the cursor to the beginning of the file
-            await self._handle.seek(0)
+        
+        # Return the cursor to the beginning of the file
+        await self._handle.seek(0)
 
-            # Load the JSON contents of the file
-            raw = await self._handle.read()
-            # Trigger read events
-            pre = await self._event_hook.aemit('read.pre', self, raw)
-            if pre and pre[0] is not None:
-                raw = pre[0]
-            data = json.loads(raw or "{}")
-            await self._event_hook.aemit('read.post', self, data)
-            return data
+        # Load the JSON contents of the file
+        raw = await self._handle.read()
+        # Trigger read events
+        pre = await self._event_hook.aemit('read.pre', self, raw)
+        if pre and pre[0] is not None:
+            raw = pre[0]
+        data = json.loads(raw or "{}")
+        await self._event_hook.aemit('read.post', self, data)
+        return data
 
-    async def write(self, data: dict[str, dict[str, Any]]):
-        data = data.copy()
+    async def write(self, data: dict[str, Mapping[Any, Mapping]]):
+        data = {k: ({str(_id): v for _id, v in tab.items()} 
+                    if hasattr(tab, "items") else tab) 
+                for k, tab in data.items()}
         if self._handle is None:
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
         if self._handle.closed:
@@ -195,7 +194,7 @@ class JSONStorage(Storage):
         # Trigger write events
         await self._event_hook.aemit('write.pre', self, data)
         # Serialize the database state using the user-provided arguments
-        serialized: bytes|str = json.dumps(data or {}, **self.kwargs)
+        serialized: bytes | str = json.dumps(data or {}, **self.kwargs)
         if 'b' in self._mode:
             serialized = serialized.encode()  # type: ignore
         post = await self._event_hook.aemit('write.post', self, serialized)
@@ -206,7 +205,8 @@ class JSONStorage(Storage):
         try:
             await self._handle.write(serialized)  # type: ignore
         except io.UnsupportedOperation:
-            raise IOError(f"Cannot write to the database. Access mode is '{self._mode}'")
+            raise IOError(
+                f"Cannot write to the database. Access mode is '{self._mode}'")
 
         # Ensure the file has been written
         await self._handle.flush()
@@ -235,18 +235,21 @@ class MemoryStorage(Storage):
     def closed(self) -> bool:
         return False
 
-    async def read(self) -> dict[str, dict[str, Any]] | None:
+    async def read(self) -> dict[str, Mapping[str, Mapping]] | None:
         return self.memory
 
-    async def write(self, data: dict[str, dict[str, Any]]):
+    async def write(self, data: dict[str, Mapping[Any, Mapping]]):
         self.memory = data
 
 
 ############# Event Hints #############
 
-_W = TypeVar('_W', bound=Callable[[str, Storage, dict[str, dict[str, Any]]], Awaitable[None]])
-_R = TypeVar('_R', bound=Callable[[str, Storage, Any], Awaitable[Any|None]])
+_W = TypeVar('_W', bound=Callable[[
+             str, Storage, dict[str, dict[str, Any]]], Awaitable[None]])
+_R = TypeVar('_R', bound=Callable[[str, Storage, Any], Awaitable[Any | None]])
 _C = TypeVar('_C', bound=Callable[[str, Storage], Awaitable[None]])
+
+
 class _write_hint(EventHint):
     @property
     def pre(self) -> Callable[[_W], _W]:
@@ -254,6 +257,8 @@ class _write_hint(EventHint):
     @property
     def post(self) -> Callable[[_R], _R]:
         """Action Type: (event_name: str, Storage, data: str|bytes) -> str|bytes|None"""
+
+
 class _read_hint(EventHint):
     @property
     def pre(self) -> Callable[[_R], _R]:
@@ -261,6 +266,8 @@ class _read_hint(EventHint):
     @property
     def post(self) -> Callable[[_W], _W]:
         """Action Type: (event_name: str, Storage, data: dict[str, dict[str, Any]]) -> None"""
+
+
 class StorageHints(EventHint):
     """
     Event hints for the storage class.
@@ -268,9 +275,11 @@ class StorageHints(EventHint):
     @property
     def write(self) -> _write_hint:
         return self._chain.write  # type: ignore
+
     @property
     def read(self) -> _read_hint:
         return self._chain.read  # type: ignore
+
     @property
     def close(self) -> Callable[[_C], _C]:
         return self._chain.close

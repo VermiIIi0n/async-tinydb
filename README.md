@@ -16,6 +16,7 @@ But hey! It passed all the tests anyways.
 * **event hooks** You can now use event hooks to do something before or after an operation. see [Event Hooks](#event-hooks) for more details.
 * **redesigned id & doc class** Now the ID class and Document class are more abstract. You can use your own class to replace the default ones in a more pleasing way.
   As long as they are inherited from `asynctinydb.table.BaseID/BaseDocument`. The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
+* **db level caching** This significantly improves the performance of all operations. But requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
 
 ## Minor differences from the original `TinyDB`:
 

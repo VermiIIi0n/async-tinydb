@@ -18,6 +18,7 @@ class ActionChain(Sequence[ActionVar]):
     * First argument to all functions is the event name, 
     following the rest of the arguments.
     """
+
     def __init__(self, actions: Iterable[ActionVar] | None = None, limit: int = 0) -> None:
         """#### Initialize the ActionChain.
         * `actions` is an iterable of actions to add to the chain.
@@ -37,7 +38,7 @@ class ActionChain(Sequence[ActionVar]):
         self._seq.insert(index, action)
 
     def extend(self, actions: Iterable[ActionVar]) -> None:
-        other = [a for a in actions]
+        other = list(actions)
         if self._limit and len(self) + len(other) > self._limit:
             raise RuntimeError(f"ActionChain limit reached: {self._limit}")
         self._seq.extend(other)
@@ -48,18 +49,18 @@ class ActionChain(Sequence[ActionVar]):
     def clear(self) -> None:
         self._seq.clear()
 
-    def trigger(self, event:str, *args: Any, **kw: Any) -> tuple:
+    def trigger(self, event: str, *args: Any, **kw: Any) -> tuple:
         """Trigger all actions in the chain."""
         return tuple(action(event, *args, **kw) for action in self)
 
     async def atrigger(self: ActionChain[AsyncActionVar],
-                       event:str, *args: Any, **kw: Any) -> tuple:
+                       event: str, *args: Any, **kw: Any) -> tuple:
         """Asynchronously trigger all actions in the chain."""
         return tuple(await asyncio.gather(*(
             action(event, *args, **kw) for action in self)))
 
     async def ordered_atrigger(self: ActionChain[AsyncActionVar],
-                              event:str, *args: Any, **kw: Any) -> tuple:
+                               event: str, *args: Any, **kw: Any) -> tuple:
         """Asynchronously trigger all actions in the chain in order."""
         ls: list[Any] = []
         for action in self:
@@ -85,7 +86,7 @@ class ActionChain(Sequence[ActionVar]):
     def __add__(self: ActionChainVar, other: ActionChainVar) -> ActionChainVar:
         return type(self)(self._seq + other._seq)
 
-    def __iadd__(self: ActionChainVar, other: ActionChainVar) -> ActionChainVar:  # type: ignore[misc]
+    def __iadd__(self: ActionChainVar, other: ActionChainVar) -> ActionChainVar:# type: ignore[misc]
         if self._limit and len(self) + len(other) > self._limit:
             raise RuntimeError(f"ActionChain limit reached: {self._limit}")
         self._seq += other._seq
@@ -111,10 +112,10 @@ class ActionChain(Sequence[ActionVar]):
         ...
 
     def __getitem__(self: ActionChainVar, x: int | slice
-                ) -> ActionVar | ActionChainVar:
+                    ) -> ActionVar | ActionChainVar:
         if isinstance(x, int):
             return self._seq[x]
-        elif isinstance(x, slice):
+        if isinstance(x, slice):
             return type(self)(self._seq[x])
 
 
@@ -186,7 +187,8 @@ class AsyncActionChain(ActionChain[AsyncActionVar]):
     * Only accepts async functions, 
     but the sync version of `aemit`: `emit` is kept.
     """
-    def __init__(self, actions: Iterable[AsyncActionVar] | None = None, limit: int=0) -> None:
+
+    def __init__(self, actions: Iterable[AsyncActionVar] | None = None, limit: int = 0) -> None:
         super().__init__(actions=actions, limit=limit)
 
 
@@ -195,11 +197,13 @@ class EventHint:
     * This class is used to hint the event name to the event hook.
     * It is also used to prevent typos in the event name.
     * Inherit this class and add the event names as class attributes."""
+
     def __init__(self, event_hook: EventHook = None, strchain: StrChain = None):
         if strchain is None:
             if event_hook is None:
                 raise ValueError(
                     "Either event_hook or strchain must be provided")
+
             def wrap(hook: EventHook):
                 def callback(event: StrChain, action: ActionVar) -> ActionVar:
                     hook[str(event)].append(action)
@@ -213,4 +217,4 @@ class EventHint:
         return self._chain(*args, **kwargs)
 
     def __getattr__(self, event: str) -> EventHint:
-        return EventHint(strchain=self._chain[event])  
+        return EventHint(strchain=self._chain[event])

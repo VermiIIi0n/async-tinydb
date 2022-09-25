@@ -238,7 +238,7 @@ class Query(QueryInstance):
                 return test(value)
 
         return QueryInstance(
-            lambda value: runner(value),
+            runner,
             (hashval if self.is_cacheable() else None)
         )
 
@@ -423,7 +423,7 @@ class Query(QueryInstance):
                 return is_sequence(value) and any(e in cond for e in value)
 
         return self._generate_test(
-            lambda value: test(value),
+            test,
             ('any', self._path, freeze(cond))
         )
 
@@ -456,7 +456,7 @@ class Query(QueryInstance):
                 return is_sequence(value) and all(e in value for e in cond)
 
         return self._generate_test(
-            lambda value: test(value),
+            test,
             ('all', self._path, freeze(cond))
         )
 
@@ -475,19 +475,17 @@ class Query(QueryInstance):
 
     def fragment(self, document: Mapping) -> QueryInstance:
         def test(value):
-            for key in document:
-                if key not in value or value[key] != document[key]:
-                    return False
-
-            return True
+            return all(key in value and value[key] == document[key] 
+                        for key in document)
 
         return self._generate_test(
-            lambda value: test(value),
+            test,
             ('fragment', freeze(document)),
             allow_empty_path=True
         )
 
-    def noop(self) -> QueryInstance:
+    @staticmethod
+    def noop() -> QueryInstance:
         """
         Always evaluate to ``True``.
 

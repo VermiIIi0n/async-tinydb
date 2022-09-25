@@ -200,7 +200,7 @@ def test_custom():
     def in_list(value, l):
         return value in l
 
-    query = Query().val.test(in_list, tuple([25, 35]))
+    query = Query().val.test(in_list, (25, 35))
     assert not query({'val': 20})
     assert query({'val': 25})
     assert not query({'val': 30})
