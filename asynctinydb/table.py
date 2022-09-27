@@ -67,7 +67,7 @@ class IncreID(BaseID, int):
     """ID class using incrementing integers."""
     _cache: dict[str, int] = {}
 
-    def __init__(self, value: str | int | IncreID):
+    def __init__(self, value: str | int | IncreID):  # skipcq: PYL-W0231
         self._value = int(value)
 
     def __str__(self) -> str:
@@ -561,7 +561,7 @@ class Table(Generic[IDVar, DocVar]):
 
         updated_ids = []
 
-        def updater(table: dict): # type: ignore
+        def updater(table: dict):  # type: ignore
             # Process all documents
             for doc_id in list(table.keys()):
                 # Add ID to list of updated documents
@@ -806,7 +806,7 @@ class Table(Generic[IDVar, DocVar]):
         # If cache exists
         if self._cache is not None:
             return self._cache
-        
+
         # Read the table data from the underlying storage
         raw = await self._read_raw_table()
         self._cache = {
@@ -859,7 +859,6 @@ class Table(Generic[IDVar, DocVar]):
         table = await self._read_table()
 
         # Perform the table update operation
-        bak = table.copy()
         updater(table)
         tables[self.name] = table
 

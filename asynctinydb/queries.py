@@ -49,6 +49,7 @@ class QueryLike(Protocol):
 
     See also https://mypy.readthedocs.io/en/stable/protocols.html#simple-user-defined-protocols
     """
+
     def __call__(self, value: Mapping) -> bool: ...
 
     def __hash__(self) -> int: ...
@@ -475,8 +476,8 @@ class Query(QueryInstance):
 
     def fragment(self, document: Mapping) -> QueryInstance:
         def test(value):
-            return all(key in value and value[key] == document[key] 
-                        for key in document)
+            return all(key in value and value[key] == document[key]
+                       for key in document)
 
         return self._generate_test(
             test,
@@ -512,6 +513,7 @@ class Query(QueryInstance):
         query._hash = None
 
         return query
+
 
 def where(key: str) -> Query:
     """

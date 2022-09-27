@@ -166,7 +166,7 @@ class JSONStorage(Storage):
             # File is empty, so we return ``None`` so TinyDB can properly
             # initialize the database
             return None
-        
+
         # Return the cursor to the beginning of the file
         await self._handle.seek(0)
 
@@ -181,8 +181,8 @@ class JSONStorage(Storage):
         return data
 
     async def write(self, data: dict[str, Mapping[Any, Mapping]]):
-        data = {k: ({str(_id): v for _id, v in tab.items()} 
-                    if hasattr(tab, "items") else tab) 
+        data = {k: ({str(_id): v for _id, v in tab.items()}
+                    if hasattr(tab, "items") else tab)
                 for k, tab in data.items()}
         if self._handle is None:
             self._handle = await aopen(self._path, self._mode, encoding=self._encoding)

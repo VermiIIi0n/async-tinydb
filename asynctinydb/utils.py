@@ -216,10 +216,10 @@ def freeze(obj):
     if isinstance(obj, dict):
         # Transform dicts into ``FrozenDict``s
         return FrozenDict((k, freeze(v)) for k, v in obj.items())
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         # Transform lists into tuples
         return tuple(freeze(el) for el in obj)
-    elif isinstance(obj, set):
+    if isinstance(obj, set):
         # Transform sets into ``frozenset``s
         return frozenset(obj)
     return obj

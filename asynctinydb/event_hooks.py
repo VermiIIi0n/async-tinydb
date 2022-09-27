@@ -97,6 +97,10 @@ class ActionChain(Sequence[ActionVar]):
             return self._seq == other._seq
         return False
 
+    @property
+    def __hash__(self) -> None: # type: ignore[override]
+        return None
+
     def __str__(self) -> str:
         return str(self._seq)
 
