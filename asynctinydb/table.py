@@ -29,12 +29,8 @@ DocVar = TypeVar('DocVar', bound="BaseDocument")
 
 class BaseID(ABC):
     @abstractmethod
-    def __init__(self: IDVar, value: str | IDVar):
+    def __init__(self, value):
         super().__init__()
-
-    @abstractmethod
-    def __str__(self) -> str:
-        return NotImplemented
 
     @abstractmethod
     def __hash__(self) -> int:
@@ -52,8 +48,8 @@ class BaseID(ABC):
 
     @classmethod
     @abstractmethod
-    def mark_exists(cls, table: Table, new_id):
-        """Mark the given id as existing. Can be defined as an async func."""
+    def mark_existed(cls, table: Table, new_id):
+        """Mark the given id as existed. Can be defined as an async func."""
         raise NotImplementedError()
 
     @classmethod
@@ -67,7 +63,7 @@ class IncreID(BaseID, int):
     """ID class using incrementing integers."""
     _cache: dict[str, int] = {}
 
-    def __init__(self, value: str | int | IncreID):  # skipcq: PYL-W0231
+    def __init__(self, value: str | int | Any):  # skipcq: PYL-W0231
         self._value = int(value)
 
     def __str__(self) -> str:
@@ -113,7 +109,7 @@ class IncreID(BaseID, int):
         return cls(next_id)
 
     @classmethod
-    def mark_exists(cls, table: Table, new_id: IncreID):
+    def mark_existed(cls, table: Table, new_id: IncreID):
         cls._cache[table.name] = max(
             cls._cache.get(table.name, 0), int(new_id) + 1)
 
@@ -297,7 +293,7 @@ class Table(Generic[IDVar, DocVar]):
 
             # We also reset the stored next ID so the next insert won't
             # re-use document IDs by accident when storing an old value
-            await ensure_async(self.document_id_class.mark_exists)(self, doc_id)
+            await ensure_async(self.document_id_class.mark_existed)(self, doc_id)
         else:
             # In all other cases we use the next free ID
             doc_id = await self._get_next_id()

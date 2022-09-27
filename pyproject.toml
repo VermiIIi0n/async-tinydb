@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.2.1"
+version = "1.2.2"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -12,7 +12,7 @@ homepage = "https://github.com/VermiIIi0n/async-tinydb"
 keywords = ["database", "nosql", "async"]
 
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",

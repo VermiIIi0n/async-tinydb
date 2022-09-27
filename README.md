@@ -7,25 +7,26 @@
 Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.  
 I will try to keep up with the latest version of `TinyDB`.
 
-Since I modified it in just a few hours, I'm not sure if it's stable enough for production.  
-But hey! It passed all the tests anyways.
-
 ## Major Changes
-* **asynchronous** Say goodbye to blocking IO.
-* **drop support** Only supports Python 3.8+.
-* **event hooks** You can now use event hooks to do something before or after an operation. see [Event Hooks](#event-hooks) for more details.
-* **redesigned id & doc class** Now the ID class and Document class are more abstract. You can use your own class to replace the default ones in a more pleasing way.
-  As long as they are inherited from `asynctinydb.table.BaseID/BaseDocument`. The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
-* **db level caching** This significantly improves the performance of all operations. But requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+* **asynchronous**: Say goodbye to blocking IO.
+  
+* **drop support**: Only supports Python 3.8+.
+  
+* **event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
+  
+* **redesigned id & doc class**: The ID and Document classes are more abstract. You can customise them more pleasingly.
+  The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 
-## Minor differences from the original `TinyDB`:
+* **db level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+
+## Minor Changes:
 
 * **lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
 
 * **ujson:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
   Why not `orjson`? Because `ujson` is fast enough and has more features.
   
-* **Storage `closed` property** Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError` will be raised.
+* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError should be raised.
   
   I strongly suggest doing the same for `middleware`.
 
@@ -43,9 +44,9 @@ from asynctinydb import TinyDB, where
 ```
 
 
-Basically, all you need to do is insert an `await` before every method that needs IO.
+All you need to do is insert an `await` before every method that needs IO.
 
-Notice that some parts of the code are blocking, for example when calling `len()` on `TinyDB` or `Table` Objects.
+Notice that some parts of the code are blocking, for example, when calling `len()` on `TinyDB` or `Table` Objects.
 
 #### Event Hooks
 Event Hooks give you more flexibility than middleware.
@@ -54,16 +55,20 @@ For example, you can achieve compress/decompress data without creating a new Sto
 Currently only supports storage events: `write.pre`, `write.post`, `read.pre`, `read.post`, `close`.
 
 * `write.pre` is called before json dumping, args: `str`(event name), `Storage`, `dict`(data).
+
 * `write.post` is called after json dumping, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).
   Only one function can be registered for this event. Return non `None` value will be written to the file.
+
 * `read.pre` is called before json loading, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).
   Only one function can be registered for this event. Return non `None` value will be used as the data.
+
 * `read.post` is called after json loading, args: `str`(event name), `Storage`, `dict`(data).
+
 * `close` is called when the storage is closed, args: `str`(event name), `Storage`.
 
 For `write.pre` and `read.post`, you can directly modify data to edit its content.
 
-However, `write.post` and `read.pre` requires you to return the value to update content because `str` is immutable in Python. If no return value or returns a `None`, you won't change anything.
+However, `write.post` and `read.pre` requires you to return the value to update content because `str` is immutable in Python. If there is no return value or returns a `None`, you won't change anything.
 
 ```Python
 s = Storage()
@@ -95,15 +100,90 @@ asyncio.run(main())
 ```Python
 async def main():
     db = TinyDB('test.json')
+
     @db.storage.on.write.pre
     async def mul(ev: str, s: Storage, data: dict):
         data["_default"]["1"]['answer'] *= 2  # directly manipulate on data
+
     @db.storage.on.write.post
     async def _print(ev, s, anystr):
       	print(anystr)  # print json dumped string
-    await db.insert({"answer": 21})
+ 
+    await db.insert({"answer": 21})  # insert() will trigger both write events
     await db.close()
     # Reload
     db = TinyDB('test.json')
     print(await db.search(Query().answer == 42))  # >>> [{'answer': 42}] 
 ```
+
+### Customise ID Class
+
+Inherit from `BaseID` and implement the following methods, then you are good to go.
+
+```Python
+from asynctinydb import BaseID
+
+class MyID(BaseID):
+  def __init__(self, value: Any):
+        """
+        Should be able to convert str into MyID instance if you want to use JSONStorage.
+        """
+
+    def __str__(self) -> str:
+        """
+        Optional.
+        Should be implement if you want to use JSONStorage.
+        """
+
+    def __hash__(self) -> int:
+        ...
+
+    def __eq__(self, other: object) -> bool:
+        ...
+
+    @classmethod
+    def next_id(cls, table: Table) -> IncreID:
+        """
+        Recommended to define as an async function, but a sync def will do.
+        Should return a unique ID.
+        """
+
+    @classmethod
+    def mark_existed(cls, table: Table, new_id: IncreID):
+        """
+        Marks an ID as existed, the same ID shouldn't be generated by next_id again.
+        """
+
+    @classmethod
+    def clear_cache(cls, table: Table):
+        """
+        Clear cache of existing IDs, if such cache exists.
+        """
+```
+
+### Customise Document Class
+
+```Python
+from asynctinydb import BaseDocument
+
+class MyDoc(BaseDocument):
+  """
+  I am too lazy to write those necessary methods.
+  """
+```
+
+Anyways, a BaseDocument class looks like this:
+
+```Python
+class BaseDocument(Mapping[IDVar, Any]):
+    @property
+    @abstractmethod
+    def doc_id(self) -> IDVar:
+        raise NotImplementedError()
+
+    @doc_id.setter
+    def doc_id(self, value: IDVar):
+        raise NotImplementedError()
+```
+
+Make sure you have implemented all the methods required by `Mapping` and `BaseDocument` classes.
