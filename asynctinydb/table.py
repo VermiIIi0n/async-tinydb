@@ -5,8 +5,8 @@ data in TinyDB.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+import asyncio
 from typing import (
-    TYPE_CHECKING,
     AsyncGenerator,
     overload,
     Callable,
@@ -20,7 +20,7 @@ from typing import (
 )
 from .queries import QueryLike
 from .storages import Storage
-from .utils import LRUCache, ensure_async, sync_await
+from .utils import LRUCache, ensure_async, sync_await, get_executor
 
 __all__ = ('Document', 'Table', 'BaseID', 'IncreID', 'BaseDocument')
 IDVar = TypeVar('IDVar', bound="BaseID")
@@ -251,6 +251,9 @@ class Table(Generic[IDVar, DocVar]):
 
         self.document_id_class.clear_cache(self)  # clear the ID cache
 
+        self._table_lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
     def __repr__(self):
         args = [
             f"name='{self.name}'",
@@ -273,6 +276,13 @@ class Table(Generic[IDVar, DocVar]):
         Get the table storage instance.
         """
         return self._storage
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop | None:
+        """
+        Get the event loop; returns `None` if no loop is set.
+        """
+        return self._loop
 
     async def insert(self, document: Mapping) -> IDVar:
         """
@@ -349,7 +359,7 @@ class Table(Generic[IDVar, DocVar]):
                 # Generate new document ID for this document
                 # Store the doc_id, so we can return all document IDs
                 # later, then save the document with the new doc_id
-                doc_id = sync_await(self._get_next_id())
+                doc_id = sync_await(self._get_next_id(), self.loop)
                 doc_ids.append(doc_id)
                 table[doc_id] = dict(document)
 
@@ -370,7 +380,7 @@ class Table(Generic[IDVar, DocVar]):
         # of all documents by using the ``list`` constructor to perform the
         # conversion.
 
-        return [i async for i in self]
+        return [self.document_class(i, i.doc_id) async for i in self]
 
     async def search(self, cond: QueryLike) -> list[DocVar]:
         """
@@ -765,7 +775,7 @@ class Table(Generic[IDVar, DocVar]):
         """
         Count the total number of documents in this table.
         """
-        table = sync_await(self._read_table())
+        table = sync_await(self._read_table(), self.loop)
         return len(table)
 
     def __aiter__(self) -> AsyncGenerator[DocVar, None]:
@@ -820,6 +830,9 @@ class Table(Generic[IDVar, DocVar]):
         only one document for example.
         """
 
+        # Set event loop
+        self._loop = asyncio.get_running_loop()
+
         # Retrieve the tables from the storage
         tables = await self._storage.read()
 
@@ -855,8 +868,10 @@ class Table(Generic[IDVar, DocVar]):
         table = await self._read_table()
 
         # Perform the table update operation
-        updater(table)
-        tables[self.name] = table
+        loop = asyncio.get_event_loop()
+        async with self._table_lock:
+            await loop.run_in_executor(get_executor(), updater, table)
+            tables[self.name] = table
 
         try:
             # Write the newly updated data back to the storage

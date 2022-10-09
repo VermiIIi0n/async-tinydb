@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from asynctinydb import TinyDB, where
-from asynctinydb.storages import JSONStorage, MemoryStorage, Storage, touch
+from asynctinydb.storages import JSONStorage, MemoryStorage, EncryptedJSONStorage, Storage, touch
 from asynctinydb.table import Document
 
 random.seed()
@@ -352,3 +352,11 @@ async def test_file_closed():
         assert storage._handle.closed
         with pytest.raises(IOError):
             await storage.read()
+
+@pytest.mark.asyncio
+async def test_encrypted_json(tmpdir):
+    key = "asdfghjklzxcvbnm"
+    storage = EncryptedJSONStorage(str(tmpdir.join('test.db')), key=key)
+    doc = {"foo": "bar"}
+    await storage.write(doc)
+    assert doc == await storage.read()

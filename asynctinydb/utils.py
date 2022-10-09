@@ -6,6 +6,9 @@ from __future__ import annotations
 import inspect
 import asyncio
 import nest_asyncio
+import platform
+import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
 from contextvars import copy_context
 from functools import wraps, partial
 from collections import OrderedDict, abc
@@ -45,7 +48,7 @@ def with_typehint(baseclass: Type[T]):
 
 
 def sync_await(coro: Awaitable[V], loop: asyncio.AbstractEventLoop = None) -> V:
-    loop = loop or asyncio.get_event_loop()
+    loop = loop or get_create_loop()
     nest_asyncio.apply(loop)
     return loop.run_until_complete(coro)
 
@@ -101,6 +104,36 @@ def to_async_iter(iterable: Generator[Any, None, None]) -> AsyncGenerator[Any, N
                 return
 
     return _gen_wrapper()
+
+
+def get_create_loop():
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
+_executor: Executor | None = None
+
+
+def get_executor() -> Executor:
+    """
+    Get the default executor for the current platform.
+    """
+    global _executor
+    if _executor:
+        return _executor
+    if platform.system() == "Linux":
+        try:
+            mp.set_start_method("fork", force=True)
+        except RuntimeError:
+            ...
+        if mp.get_start_method() == "fork":
+            _executor = ProcessPoolExecutor()
+    _executor = ThreadPoolExecutor()
+    return _executor
 
 
 class LRUCache(abc.MutableMapping, Generic[K, V]):

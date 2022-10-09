@@ -98,7 +98,7 @@ class TinyDB(TableBase):
         self._tables: Dict[str, Table] = {}
 
     def __repr__(self):
-        tables = sync_await(self.tables())
+        tables = sync_await(self.tables(), self.loop)
         args = [
             f"tables={list(tables)}",
             f"tables_count={len(tables)}",
@@ -197,7 +197,7 @@ class TinyDB(TableBase):
         # If the table is currently opened, we need to forget the table class
         # instance
         if name in self._tables:
-            del self._tables[name]
+            self._tables.pop(name).clear_data_cache()
 
         data = await self.storage.read()
 

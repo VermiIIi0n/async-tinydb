@@ -8,22 +8,26 @@ Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.
 I will try to keep up with the latest version of `TinyDB`.
 
 ## Major Changes
-* **asynchronous**: Say goodbye to blocking IO.
+* **Asynchronous**: Say goodbye to blocking IO.
   
-* **drop support**: Only supports Python 3.8+.
+* **Drop support**: Only supports Python 3.8+.
   
-* **event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
+* **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
   
-* **redesigned id & doc class**: The ID and Document classes are more abstract. You can customise them more pleasingly.
+* **Redesigned ID & Doc class**: You can customise them more pleasingly.
   The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 
-* **db level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+  The default Doc class remains almost the same.
+  
+* **DB level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+
+* **Built-in AES encryption**: You can now encrypt your database with AES. See [Encryption](#encryption) for more details.
 
 ## Minor Changes:
 
-* **lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
+* **Lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
 
-* **ujson:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
+* **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
   Why not `orjson`? Because `ujson` is fast enough and has more features.
   
 * **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError should be raised.
@@ -52,7 +56,7 @@ Notice that some parts of the code are blocking, for example, when calling `len(
 Event Hooks give you more flexibility than middleware.
 For example, you can achieve compress/decompress data without creating a new Storage class.
 
-Currently only supports storage events: `write.pre`, `write.post`, `read.pre`, `read.post`, `close`.
+Currently only supports json storage events: `write.pre`, `write.post`, `read.pre`, `read.post`, `close`.
 
 * `write.pre` is called before json dumping, args: `str`(event name), `Storage`, `dict`(data).
 
@@ -78,7 +82,49 @@ async def f(ev, s, data):  # Will be executed on event `write.pre`
   ...
 ```
 
+#### Encryption
 
+Currently only supports AES-GCM encryption.
+
+The final data produced has such a structure:
+
+| Structure     |               |                  |       |                |
+| ------------- | :-----------: | :--------------: | :---: | :------------: |
+| Bytes Length: |       1       |       4-16       |  16   |   <Unknown>    |
+| Content:      | Digest Length | Digest (MAC Tag) | Nonce | Encrypted Data |
+
+There are two ways to use encryption:
+
+##### 1. Use `EncryptedJSONStorage` directly
+
+```Python
+from asynctinydb import EncryptedJSONStorage, TinyDB
+
+async def main():
+    db = TinyDB("db.json", key="your key goes here", storage=EncryptedJSONStorage)
+
+```
+
+##### 2. Use  `Modifier` class
+
+The modifier class contains some methods to modify the behaviour of `TinyDB` and `Storage` classes.
+
+It relies on `event hooks`.
+
+`add_encryption` is a method of the `Modifier` class. It will add encryption to the storage that fulfils the following conditions:
+
+1. The storage has "write.post" and "read.pre" events.
+2. The storage stores data in `bytes`.
+3. The argument passed to the events is `str` or `bytes`. See the implementation of `JSONStorage` for more details.
+
+```Python
+from asynctinydb import TinyDB, Modifier
+
+async def main():
+    db = TinyDB("db.json", access_mode="rb+")  # Binary mode is required
+    Modifier.add_encryption(db.storage, "your key goes here")
+
+```
 
 ## Example Codes:
 
@@ -118,7 +164,7 @@ async def main():
 
 ### Customise ID Class
 
-Inherit from `BaseID` and implement the following methods, then you are good to go.
+Inherit from `BaseID` and implement the following methods, and then you are good to go.
 
 ```Python
 from asynctinydb import BaseID
@@ -126,13 +172,13 @@ from asynctinydb import BaseID
 class MyID(BaseID):
   def __init__(self, value: Any):
         """
-        Should be able to convert str into MyID instance if you want to use JSONStorage.
+        You should be able to convert str into MyID instance if you want to use JSONStorage.
         """
 
     def __str__(self) -> str:
         """
         Optional.
-        Should be implement if you want to use JSONStorage.
+        It should be implemented if you want to use JSONStorage.
         """
 
     def __hash__(self) -> int:
@@ -144,14 +190,14 @@ class MyID(BaseID):
     @classmethod
     def next_id(cls, table: Table) -> IncreID:
         """
-        Recommended to define as an async function, but a sync def will do.
-        Should return a unique ID.
+        Recommended to define it as an async function, but a sync def will do.
+        It should return a unique ID.
         """
 
     @classmethod
     def mark_existed(cls, table: Table, new_id: IncreID):
         """
-        Marks an ID as existed, the same ID shouldn't be generated by next_id again.
+        Marks an ID as existing; the same ID shouldn't be generated by next_id again.
         """
 
     @classmethod
