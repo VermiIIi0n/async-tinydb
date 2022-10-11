@@ -2,6 +2,7 @@
 Contains the :class:`base class <asynctinydb.middlewares.Middleware>` for
 middlewares and implementations.
 """
+
 from .storages import Storage
 
 
@@ -88,16 +89,25 @@ class CachingMiddleware(Middleware):
     from cache.
     """
 
-    #: The number of write operations to cache before writing to disc
-    WRITE_CACHE_SIZE = 1000
-
-    def __init__(self, storage_cls):
+    def __init__(self, storage_cls, cache_size=1000):
         # Initialize the parent constructor
         super().__init__(storage_cls)
 
         # Prepare the cache
         self.cache = None
+        self.cache_size = cache_size
         self._cache_modified_count = 0
+
+    @property
+    def WRITE_CACHE_SIZE(self):
+        """
+        Legacy property for backwards compatibility.
+        """
+        return self.cache_size
+
+    @WRITE_CACHE_SIZE.setter
+    def WRITE_CACHE_SIZE(self, value):
+        self.cache_size = value
 
     async def read(self):
         if self.cache is None:
@@ -115,7 +125,7 @@ class CachingMiddleware(Middleware):
         self._cache_modified_count += 1
 
         # Check if we need to flush the cache
-        if self._cache_modified_count >= self.WRITE_CACHE_SIZE:
+        if self._cache_modified_count >= self.cache_size:
             await self.flush()
 
     async def flush(self):

@@ -1,38 +1,45 @@
-![logo](https://raw.githubusercontent.com/msiemens/tinydb/master/artwork/logo.png)
+<img src="./artwork/logo.png" alt="logo" style="zoom:50%;" />
 
 ## What's This?
 
-"An asynchronous IO version of `TinyDB` based on `aiofiles`."
+An asynchronous version of `TinyDB` based on `aiofiles`.
 
 Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.  
+
 I will try to keep up with the latest version of `TinyDB`.
 
-## Major Changes
-* **Asynchronous**: Say goodbye to blocking IO.
-  
+
+
+## Incompatible Changes
+
+Major Changes:
+
+* **Asynchronous**: Say goodbye to blocking IO. **Don't forget to `await` async methods**!
 * **Drop support**: Only supports Python 3.8+.
-  
-* **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
-  
-* **Redesigned ID & Doc class**: You can customise them more pleasingly.
-  The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 
-  The default Doc class remains almost the same.
-  
-* **DB level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is moved to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
-
-* **Built-in AES encryption**: You can now encrypt your database with AES. See [Encryption](#encryption) for more details.
-
-## Minor Changes:
+Minor Changes:
 
 * **Lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
 
 * **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
   Why not `orjson`? Because `ujson` is fast enough and has more features.
-  
-* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError should be raised.
-  
-  I strongly suggest doing the same for `middleware`.
+
+* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError` should be raised.
+
+* **`CachingMiddleWare`**: `WRITE_CACHE_SIZE` is now instance-specific.  
+  Example: `TinyDB("test.db", storage=CachingMiddleWare(JSONStorage, 1024))`
+
+## New Features
+
+* **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
+
+* **Redesigned ID & Doc class**: You can [customise them](#customise-id-class) more pleasingly.  
+  The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.  
+  The default Doc class remains almost the same.
+
+* **DB level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is transmitted to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+
+* **Built-in `Modifier`**: Use `Modifier` to easily [encrypt](#encryption) and [compress](#compression) your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
 
 ## How to use it?
 
@@ -43,55 +50,45 @@ pip install async-tinydb
 ```
 
 #### Importing
+
 ```Python
 from asynctinydb import TinyDB, where
 ```
 
+#### Using
 
-All you need to do is insert an `await` before every method that needs IO.
+See the [original `TinyDB` documents](https://tinydb.readthedocs.org). Insert an `await` in front of async methods. 
 
-Notice that some parts of the code are blocking, for example, when calling `len()` on `TinyDB` or `Table` Objects.
+Notice that some codes are still blocking, for example, when calling `len()` on `TinyDB` or `Table` Objects.
 
-#### Event Hooks
-Event Hooks give you more flexibility than middleware.
-For example, you can achieve compress/decompress data without creating a new Storage class.
+That's it.
 
-Currently only supports json storage events: `write.pre`, `write.post`, `read.pre`, `read.post`, `close`.
+******
 
-* `write.pre` is called before json dumping, args: `str`(event name), `Storage`, `dict`(data).
+#### Documents For Advances Usage
 
-* `write.post` is called after json dumping, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).
-  Only one function can be registered for this event. Return non `None` value will be written to the file.
+* [Modifier](./docs/Modifier.md)
+* [Event Hooks](./docs/EventHooks.md)
 
-* `read.pre` is called before json loading, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).
-  Only one function can be registered for this event. Return non `None` value will be used as the data.
+#### Replacing ID & Document Class
 
-* `read.post` is called after json loading, args: `str`(event name), `Storage`, `dict`(data).
-
-* `close` is called when the storage is closed, args: `str`(event name), `Storage`.
-
-For `write.pre` and `read.post`, you can directly modify data to edit its content.
-
-However, `write.post` and `read.pre` requires you to return the value to update content because `str` is immutable in Python. If there is no return value or returns a `None`, you won't change anything.
+**Mixing classes in one table may cause errors!**
 
 ```Python
-s = Storage()
-# By accessing the attribute `on`, you can register a new func to the event
-@s.on.write.pre
-async def f(ev, s, data):  # Will be executed on event `write.pre`
-  ...
+from asynctinydb import TinyDB, UUID, IncreID, Document
+
+db = TinyDB("database.db")
+
+# Replacing ID class to UUID
+# By default, ID class is IncreID, document_class is Document
+tab = db.table("table1", document_id_class=UUID, document_class=Document)
 ```
+
+_See [Customisation](#customise-id-class) for more details_
 
 #### Encryption
 
 Currently only supports AES-GCM encryption.
-
-The final data produced has such a structure:
-
-| Structure     |               |                  |       |                |
-| ------------- | :-----------: | :--------------: | :---: | :------------: |
-| Bytes Length: |       1       |       4-16       |  16   |   <Unknown>    |
-| Content:      | Digest Length | Digest (MAC Tag) | Nonce | Encrypted Data |
 
 There are two ways to use encryption:
 
@@ -111,20 +108,45 @@ The modifier class contains some methods to modify the behaviour of `TinyDB` and
 
 It relies on `event hooks`.
 
-`add_encryption` is a method of the `Modifier` class. It will add encryption to the storage that fulfils the following conditions:
+`Encryption` is a subclass of the `Modifier` class. It contains methods to add encryption to the storage that fulfils the following conditions:
 
-1. The storage has "write.post" and "read.pre" events.
+1. The storage has `write.post` and `read.pre` events.
 2. The storage stores data in `bytes`.
-3. The argument passed to the events is `str` or `bytes`. See the implementation of `JSONStorage` for more details.
+3. The argument passed to the methods is `str` or `bytes`. See the implementation of `JSONStorage` for more details.
 
 ```Python
 from asynctinydb import TinyDB, Modifier
 
 async def main():
     db = TinyDB("db.json", access_mode="rb+")  # Binary mode is required
-    Modifier.add_encryption(db.storage, "your key goes here")
+    Modifier.Encryption.AES_GCM(db, "your key goes here")
+    # Or, you can pass a Storage instance
+    # Modifier.Encryption.AES_GCM(db.storage, "your key goes here")
 
 ```
+
+#### Isolation Level
+
+To avoid blocking codes, Async-TinyDB puts CPU-bound tasks to another thread/process (On Linux, if forking a process is possible, `ProcessPoolExecutor` will be used instead of the `ThreadPoolExecutor`).
+
+Unfortunately, this introduces chances of data being modified when:
+
+* Manipulating mutable objects within `Document` instances in another coroutine
+* Performing updating/saving/searching operations (These operations are run in a different thread/process)
+* The conditions above are satisfied in the same `Table`
+* The conditions above are satisfied simultaneously
+
+You can either avoid these operations or set a higher isolation level to mitigate this problem.
+
+```Python
+db.isolevel = 1  # By default isolevel is 0
+```
+
+`isolevel`:
+
+0. No isolation
+1. Don't run operations in another thread/process, or run in a blocking way.
+2. Disable
 
 ## Example Codes:
 
@@ -232,4 +254,4 @@ class BaseDocument(Mapping[IDVar, Any]):
         raise NotImplementedError()
 ```
 
-Make sure you have implemented all the methods required by `Mapping` and `BaseDocument` classes.
+Make sure you have implemented all the methods required by  `BaseDocument` class.

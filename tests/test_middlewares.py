@@ -44,7 +44,7 @@ async def test_caching_write_many(storage):
 @pytest.mark.asyncio
 async def test_caching_flush(storage):
     # Write contents
-    for _ in range(CachingMiddleware.WRITE_CACHE_SIZE - 1):
+    for _ in range(storage.WRITE_CACHE_SIZE - 1):
         await storage.write(doc)
 
     # Not yet flushed...

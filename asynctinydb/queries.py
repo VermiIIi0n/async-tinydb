@@ -47,7 +47,8 @@ class QueryLike(Protocol):
     This query protocol is used to make MyPy correctly support the query
     pattern that TinyDB uses.
 
-    See also https://mypy.readthedocs.io/en/stable/protocols.html#simple-user-defined-protocols
+    See also 
+    https://mypy.readthedocs.io/en/stable/protocols.html#simple-user-defined-protocols
     """
 
     def __call__(self, value: Mapping) -> bool: ...

@@ -28,12 +28,12 @@ from .queries import Query, where
 from .storages import Storage, JSONStorage, EncryptedJSONStorage, MemoryStorage
 from .modifier import Modifier
 from .database import TinyDB
-from .version import __version__
-from .table import BaseID, BaseDocument
+from .version import __version__  # noqa
+from .table import BaseID, BaseDocument, IncreID, Document, UUID
 
 __all__ = (
     "TinyDB", "Storage", "JSONStorage",
     "EncryptedJSONStorage", "MemoryStorage",
     "Query", "where", "BaseID", "BaseDocument",
-    "Modifier",
-    )
+    "Modifier", "IncreID", "Document", "UUID"
+)

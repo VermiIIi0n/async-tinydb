@@ -1,5 +1,7 @@
 *.py[cod]
 .vscode
+.empty
+benchmark
 
 # C extensions
 *.so

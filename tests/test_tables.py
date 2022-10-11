@@ -3,6 +3,8 @@ import re
 import pytest
 
 from asynctinydb import where
+from asynctinydb.database import TinyDB
+from asynctinydb.table import UUID
 
 @pytest.mark.asyncio
 async def test_next_id(db):
@@ -169,3 +171,14 @@ async def test_table_repr(db):
 async def test_truncate_table(db):
     await db.truncate()
     assert await db._get_next_id() == 1
+
+@pytest.mark.asyncio
+async def test_uuid(db: TinyDB):
+    table = db.table("table1", document_id_class=UUID)
+
+    for i in range(2):
+        doc = {str(i): i}
+        await table.insert(doc)
+
+    for d in await table.all():
+        assert isinstance(d.doc_id, UUID)

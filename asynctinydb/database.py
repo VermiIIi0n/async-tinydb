@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Dict, Set, Type
 
 from . import JSONStorage
 from .storages import Storage
-from .table import Table, Document
+from .table import Table, Document, IncreID
 from .utils import with_typehint, sync_await
 
 # The table's base class. This is used to add type hinting from the Table
@@ -103,12 +103,17 @@ class TinyDB(TableBase):
             f"tables={list(tables)}",
             f"tables_count={len(tables)}",
             f"default_table_documents_count={self.__len__()}",
-            f"all_tables_documents_count={[f'{table}={len(self.table(table))}' for table in tables]}",
+            "all_tables_documents_count="
+            f"{[f'{table}={len(self.table(table))}' for table in tables]}",
         ]
 
         return f"<{type(self).__name__} {', '.join(args)}>"
 
-    def table(self, name: str, **kwargs) -> Table:
+    def table(self, name: str,
+              cache_size: int = 10,
+              document_id_class=IncreID,
+              document_class=Document,
+              **kw) -> Table:
         """
         Get access to a specific table.
 
@@ -129,7 +134,10 @@ class TinyDB(TableBase):
         if name in self._tables:
             return self._tables[name]
 
-        table = self.table_class(self.storage, name, **kwargs)
+        kw["cache_size"] = cache_size
+        kw["document_id_class"] = document_id_class
+        kw["document_class"] = document_class
+        table = self.table_class(self.storage, name, **kw)
         self._tables[name] = table
 
         return table

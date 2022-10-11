@@ -2,10 +2,13 @@ import ujson as json
 import os
 import random
 import tempfile
+import re
+import uuid
+from datetime import datetime, timedelta
 
 import pytest
 
-from asynctinydb import TinyDB, where
+from asynctinydb import TinyDB, where, Modifier
 from asynctinydb.storages import JSONStorage, MemoryStorage, EncryptedJSONStorage, Storage, touch
 from asynctinydb.table import Document
 
@@ -332,16 +335,13 @@ async def test_storage_event_hooks(tmpdir):
         return "{\"ab\": 114}"
     assert {"ab": 114} == await storage.read()
 
-    # Test that this event hook has a function limit of 1
-    with pytest.raises(RuntimeError):
-        @storage.on.read.pre
-        async def r(*arg):
-            ...
     # Should raise an error because this event doesn't exist
     with pytest.raises(AttributeError):
         @storage.on.read.not_a_event
         async def r(*arg):
             ...
+    # Test multiple modifiers
+    storage.event_hook.clear_actions()
 
 @pytest.mark.asyncio
 async def test_file_closed():
@@ -360,3 +360,51 @@ async def test_encrypted_json(tmpdir):
     doc = {"foo": "bar"}
     await storage.write(doc)
     assert doc == await storage.read()
+
+@pytest.mark.asyncio
+async def test_compress_brotli(tmpdir):
+    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    Modifier.Compression.brotli(storage)
+    doc = {str(i): i for i in range(10000)}
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+@pytest.mark.asyncio
+async def test_compress_blosc2(tmpdir):
+    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    Modifier.Compression.blosc2(storage)
+    doc = {str(i): i for i in range(10000)}
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+@pytest.mark.asyncio
+async def test_extended_json(tmpdir):
+    storage = JSONStorage(str(tmpdir.join('test.db')))
+    Modifier.Conversion.ExtendedJSON(storage)
+
+    doc = {
+        "foo": "bar",
+        "int": 128,
+        "float": 1.5,
+        "bool": True,
+        "none": None,
+        "list": [1, 2, 3],
+        "dict": {"a": 1, "b": 2},
+        "datetime": datetime(2018, 1, 1, 0, 0, 0),
+        "timedelta": timedelta(days=1),
+        "bytes": b"asdf",
+        "tuple": (1, 2, 3),
+        "set": {1, 2, 3},
+        "frozenset": frozenset({1, 2, 3}),
+        "complex": 1 + 2j,
+        "uuid": uuid.UUID("12345678123456781234567812345678"),
+        "regex": re.compile("foo"),
+    }
+
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+    with pytest.raises(RecursionError):
+        d = {}
+        d["doc"] = d
+        await storage.write(d)

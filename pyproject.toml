@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.2.3"
+version = "1.3.0"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -42,7 +42,14 @@ typing-extensions = { version = "^3.10.0 || ^4.0.0", python = "<=3.10" }
 nest-asyncio = "^1.5.5"
 ujson = "^5.4.0"
 aiofiles = "^22.1.0"
-pycryptodome = "^3.15.0"
+pycryptodome = {version = "^3.15.0", optional = true}
+Brotli = {version = "^1.0.9", optional = true}
+blosc2 = {version = "^0.4.1", optional = true}
+
+[tool.poetry.extras]
+encryption = ["pycryptodome"]
+compression = ["Brotli", "blosc2"]
+all = ["pycryptodome", "Brotli", "blosc2"]
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"

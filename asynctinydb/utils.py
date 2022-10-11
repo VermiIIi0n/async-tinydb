@@ -5,7 +5,6 @@ Utility functions.
 from __future__ import annotations
 import inspect
 import asyncio
-import nest_asyncio
 import platform
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
@@ -15,6 +14,7 @@ from collections import OrderedDict, abc
 from typing import List, Iterator, TypeVar, Generic, Union, Optional, Type, \
     TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload, Awaitable, \
     Generator, AsyncGenerator
+import nest_asyncio
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -57,6 +57,14 @@ def ensure_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     if asyncio.iscoroutinefunction(func):
         return func
     return to_async(func)
+
+
+async def arun_parallel(func: Callable[..., V], *args, **kw) -> V:
+    """Run a sync function in another thread/process."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        get_executor(),
+        partial(func, *args, **kw))
 
 #### quart.utils ####
 
@@ -115,25 +123,25 @@ def get_create_loop():
         return loop
 
 
-_executor: Executor | None = None
+_EXECUTOR: Executor | None = None
 
 
 def get_executor() -> Executor:
     """
     Get the default executor for the current platform.
     """
-    global _executor
-    if _executor:
-        return _executor
+    global _EXECUTOR
+    if _EXECUTOR:
+        return _EXECUTOR
     if platform.system() == "Linux":
         try:
             mp.set_start_method("fork", force=True)
         except RuntimeError:
             ...
         if mp.get_start_method() == "fork":
-            _executor = ProcessPoolExecutor()
-    _executor = ThreadPoolExecutor()
-    return _executor
+            _EXECUTOR = ProcessPoolExecutor()
+    _EXECUTOR = ThreadPoolExecutor()
+    return _EXECUTOR
 
 
 class LRUCache(abc.MutableMapping, Generic[K, V]):
@@ -318,7 +326,7 @@ class StrChain(Sequence[str]):
     def __getattr__(self: S, name: str) -> S:
         if name.startswith('_'):
             raise AttributeError(
-                f"{name} : String can't start with '_' when using __getattr__" +
+                f"{name} : String can't start with '_' when using __getattr__"
                 " , use __getitem__ instead")
         return self.__create(self._list + [name])
 
