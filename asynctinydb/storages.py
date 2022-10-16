@@ -5,19 +5,15 @@ implementations.
 from __future__ import annotations
 import io
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Awaitable, TypeVar
+from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar
 import os
-import asyncio
-from functools import partial
 import ujson as json
-from aiofiles import open as aopen
-from aiofiles.threadpool.text import AsyncTextIOWrapper as TWrapper
-from aiofiles.threadpool.binary import AsyncFileIO as BWrapper
+from tempfile import NamedTemporaryFile
 from .event_hooks import EventHook, ActionChain, EventHint, ActionCentipede
 from .event_hooks import AsyncActionType
-from .utils import ensure_async, arun_parallel
+from .utils import AsinkRunner
 
-__all__ = ('Storage', 'JSONStorage', 'MemoryStorage')
+__all__ = ("Storage", "JSONStorage", "MemoryStorage")
 
 
 def touch(path: str, create_dirs: bool):
@@ -31,8 +27,7 @@ def touch(path: str, create_dirs: bool):
         base_dir = os.path.dirname(path)
 
         # Check if we need to create missing parent directories
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
+        os.makedirs(base_dir, exist_ok=True)
 
     # Create the file by opening it in 'a' mode which creates the file if it
     # does not exist yet but does not modify its contents
@@ -78,7 +73,7 @@ class Storage(ABC):
         """
 
     @abstractmethod
-    async def read(self) -> dict[str, Any] | None:
+    async def read(self) -> MutableMapping[str, Any] | None:
         """
         Read the current state.
 
@@ -90,7 +85,7 @@ class Storage(ABC):
         raise NotImplementedError('To be overridden!')
 
     @abstractmethod
-    async def write(self, data: dict) -> None:
+    async def write(self, data: Mapping) -> None:
         """
         Write the current state of the database to the storage.
 
@@ -113,7 +108,7 @@ class JSONStorage(Storage):
     """
 
     def __init__(self, path: str, create_dirs=False,
-                 encoding=None, access_mode='r+', **kwargs):
+                 encoding=None, access_mode="r+", **kwargs):
         """
         Create a new instance.
 
@@ -123,8 +118,8 @@ class JSONStorage(Storage):
         * `path`: Where to store the JSON data.
         * `create_dirs`: Whether to create all missing parent directories.
         * `encoding`: The encoding to use when reading/writing the file.
-        * `access_mode`: mode in which 
-        the file is opened (r, r+, w, a, x, b, t, +, U)
+        * `access_mode`: mode in which the file is opened
+         (r, r+, w, a, x, b, t, +, U)
         """
 
         super().__init__()
@@ -132,19 +127,17 @@ class JSONStorage(Storage):
         self._mode = access_mode
         self.kwargs = kwargs
 
-        # Create the file if it doesn't exist and creating is allowed by the
-        # access mode
-        if any(character in self._mode for character in ('+', 'w', 'a')):
-            touch(path, create_dirs=create_dirs)
-
         if encoding is None and 'b' not in self._mode:
             encoding = "utf-8"
 
         # Open the file for reading/writing
-        self._handle: TWrapper | BWrapper | None = None
+        self._closed = False
         self._path = path
         self._encoding = encoding
-        self._data_lock = asyncio.Lock()
+        self._create_dirs = create_dirs
+        self._sink = AsinkRunner()
+
+        # Initialize event hooks
 
         def sentinel(event: str, storage: Storage, data: str | bytes):
             prev_ret = data
@@ -156,7 +149,6 @@ class JSONStorage(Storage):
                 return (storage, data), {}
             return preprocess
 
-        # Initialize event hooks
         _chain = ActionCentipede[AsyncActionType]
         self.event_hook.hook("write.pre", _chain(sentinel=sentinel))
         self.event_hook.hook("write.post", _chain(sentinel=sentinel))
@@ -167,67 +159,54 @@ class JSONStorage(Storage):
 
     @property
     def closed(self) -> bool:
-        return self._handle is not None and self._handle.closed
+        return self._closed
 
     async def close(self) -> None:
-        await self._event_hook.aemit('close', self)
-        if self._handle is not None:
-            await self._handle.close()
+        if not self.closed:
+            await self._prep()
+            await self._sink.aclose()
+            self._closed = True
+            await self._event_hook.aemit("close", self)
 
     async def read(self) -> dict[str, Any] | None:
         """Read data from the storage."""
-        if self._handle is None:
-            self._handle = await aopen(self._path, self._mode, encoding=self._encoding)
+        await self._prep()
 
-        # Get the file size by moving the cursor to the file end and reading
-        # its location
-        if self._handle.closed:
-            raise IOError("File is closed")
-        await self._handle.seek(0, os.SEEK_END)
-        size = await self._handle.tell()
-
-        if not size:
-            # File is empty, so we return ``None`` so TinyDB can properly
-            # initialize the database
-            return None
-
-        # Return the cursor to the beginning of the file
-        await self._handle.seek(0)
+        def _atomic_read():
+            """Read data from the file."""
+            with open(self._path, mode=self._mode, encoding=self._encoding) as f:
+                return f.read()
 
         # Load the JSON contents of the file
-        raw = await self._handle.read()
+        raw: str | bytes = await self._sink.run(_atomic_read)
+
+        if not raw:
+            return None
 
         # Pre-process data
         pre: str | bytes = await self._event_hook.aemit("read.pre", self, raw)
-        raw = pre if pre is not None else raw
+        raw = pre if pre is not None else raw or "{}"
 
         # Deserialize the data
-        data = await arun_parallel(json.loads, raw or "{}")
+        data = await self._sink.run(json.loads, raw)  # type: ignore
 
         # Post-process data
         post = await self._event_hook.aemit("read.post", self, data)
         data = post if post is not None else data
         return data
 
-    async def write(self, data: dict):
+    async def write(self, data: Mapping):
         """Write data to the storage."""
-        if self._handle is None:
-            self._handle = await aopen(
-                self._path, self._mode, encoding=self._encoding)
-        if self._handle.closed:
-            raise IOError('File is closed')
-        # Move the cursor to the beginning of the file just in case
-        await self._handle.seek(0)
+        await self._prep()
 
         # Pre-process data
-        async with self._data_lock:
-            pre = await self._event_hook.aemit("write.pre", self, data)
-            data = pre if pre is not None else data
-            # Convert keys to strings
-            data = await arun_parallel(self._stringify_keys, data)
+        pre = await self._event_hook.aemit("write.pre", self, data)
+        data = pre if pre is not None else data
+        # Convert keys to strings
+        data = await self._sink.run(self._stringify_keys, data)
 
         # Serialize the database state using the user-provided arguments
-        task = arun_parallel(partial(json.dumps, data or {}, **self.kwargs))
+        task = self._sink.run(json.dumps, data or {}, **self.kwargs)
         serialized: bytes | str = await task
 
         # Post-process the serialized data
@@ -239,33 +218,58 @@ class JSONStorage(Storage):
 
         # Write the serialized data to the file
         try:
-            await self._handle.write(serialized)  # type: ignore
+            await self._sink.run(self._atomic_write, serialized)
         except io.UnsupportedOperation as e:
             raise IOError(
-                f"Cannot write to the database. Access mode is '{self._mode}'") from e
+                f"Cannot write to the file. Access mode is '{self._mode}'") from e
 
-        # Ensure the file has been written
-        await self._handle.flush()
-        await ensure_async(os.fsync)(self._handle.fileno())
+    async def _prep(self):
+        if self.closed:
+            raise IOError("Storage is closed")
+        # Create the file if it doesn't exist and creating is allowed by the
+        # access mode
+        if any(character in self._mode for character in ('+', 'w', 'a')):
+            await self._sink.run(touch, self._path, create_dirs=self._create_dirs)
 
-        # Remove data that is behind the new cursor in case the file has
-        # gotten shorter
-        await self._handle.truncate()
+    def _atomic_write(self, data):
+        # Open the temp file
+        with NamedTemporaryFile(mode=self._mode, encoding=self._encoding,
+                                delete=False) as f:
+
+            f.write(data)
+
+            # Remove data that is behind the new cursor in case the file has
+            # gotten shorter
+            f.truncate()
+
+            # Ensure the file has been written
+            f.flush()
+            os.fsync(f.fileno())
+            f.close()
+
+            # Use os.replace to ensure atomicity
+            os.replace(f.name, self._path)
 
     @classmethod
     def _stringify_keys(cls, data, memo: dict = None):
         if memo is None:
             memo = {}
-        if isinstance(data, dict):
+        if isinstance(data, MutableMapping):
             if id(data) in memo:
                 return memo[id(data)]
             memo[id(data)] = {}  # Placeholder in case of loop references
             memo[id(data)].update((str(k), cls._stringify_keys(v, memo))
                                   for k, v in data.items())
             return memo[id(data)]
-        if isinstance(data, list|tuple):
+        if isinstance(data, list | tuple):
             return [cls._stringify_keys(v, memo) for v in data]
         return data
+
+    def __del__(self):
+        try:
+            self._sink.close()
+        except RuntimeError as e:  # pragma: no cover # Hard to test
+            raise RuntimeError("Storage was not closed properly") from e
 
 
 class EncryptedJSONStorage(JSONStorage):
@@ -310,6 +314,9 @@ class EncryptedJSONStorage(JSONStorage):
         * `compress_extra`: Extra arguments to pass to the compression function.
         """
 
+        super().__init__(path=path, create_dirs=create_dirs,
+                         encoding=encoding, access_mode=access_mode, **kwargs)
+
         from .modifier import Modifier  # avoid circular import
         if key is None:
             raise ValueError("key must be provided")
@@ -318,8 +325,6 @@ class EncryptedJSONStorage(JSONStorage):
         if 'b' not in access_mode:
             raise ValueError("access_mode must be binary")
 
-        super().__init__(path=path, create_dirs=create_dirs,
-                         encoding=encoding, access_mode=access_mode, **kwargs)
         if compression:
             compression(self, **(compress_extra or {}))
         encryption(self, key, **(encrypt_extra or {}))
@@ -342,10 +347,10 @@ class MemoryStorage(Storage):
     def closed(self) -> bool:
         return False
 
-    async def read(self) -> dict[str, Any] | None:
+    async def read(self) -> MutableMapping[str, Any] | None:
         return self.memory
 
-    async def write(self, data: dict):
+    async def write(self, data: Mapping):
         self.memory = data
 
 

@@ -7,10 +7,6 @@ import os.path
 import tempfile
 
 import pytest  # type: ignore
-import asyncio
-
-import nest_asyncio
-nest_asyncio.apply()
 
 enc = Modifier.Encryption
 comp = Modifier.Compression
@@ -27,9 +23,9 @@ mods: list = list(product(
 
 @pytest.fixture(params=[
     "memory", "json", "json-encrypted",
-    "json-encrypted-modifier", "json-isolevel1",
-    "json_extend"] + mods)
-def db(request):
+    "json-encrypted-modifier", "json-isolevel0", "json-isolevel1", "json-isolevel2",
+    "json-nocache", "json_extend"] + mods)
+async def db(request):
     with tempfile.TemporaryDirectory() as tmpdir:
         if request.param == "json":
             db_ = TinyDB(os.path.join(tmpdir, "test.db"), storage=JSONStorage)
@@ -41,9 +37,16 @@ def db(request):
         elif request.param == "json-encrypted-modifier":
             db_ = TinyDB(os.path.join(tmpdir, "test.db"), access_mode="rb+")
             Modifier.Encryption.AES_GCM(db_, key=key)
+        elif request.param == "json-isolevel0":
+            db_ = TinyDB(os.path.join(tmpdir, "test.db"), isolevel=0)
         elif request.param == "json-isolevel1":
             db_ = TinyDB(os.path.join(tmpdir, "test.db"), storage=JSONStorage)
             db_.isolevel = 1
+        elif request.param == "json-isolevel2":
+            db_ = TinyDB(os.path.join(tmpdir, "test.db"), storage=JSONStorage)
+            db_.isolevel = 2
+        elif request.param == "json-nocache":
+            db_ = TinyDB(os.path.join(tmpdir, "test.db"), no_dbcache=True)
         elif request.param == "json_extend":
             db_ = TinyDB(os.path.join(tmpdir, "test.db"), storage=JSONStorage)
             Modifier.Conversion.ExtendedJSON(db_)
@@ -53,12 +56,11 @@ def db(request):
             for mod in request.param:
                 mod(db_)
 
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(db_.drop_tables())
-        loop.run_until_complete(db_.insert_multiple(
-            {"int": 1, "char": c} for c in "abc"))
+        await db_.drop_tables()
+        await db_.insert_multiple({"int": 1, "char": c} for c in "abc")
 
-        yield db_
+        async with db_:
+            yield db_
 
 
 @pytest.fixture

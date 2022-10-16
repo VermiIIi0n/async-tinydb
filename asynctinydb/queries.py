@@ -23,11 +23,11 @@ from .utils import freeze
 
 from typing import Protocol
 
-__all__ = ('Query', 'QueryLike', 'where')
+__all__ = ("Query", "QueryLike", "where")
 
 
 def is_sequence(obj):
-    return hasattr(obj, '__iter__')
+    return hasattr(obj, "__iter__")
 
 
 class QueryLike(Protocol):
@@ -38,8 +38,7 @@ class QueryLike(Protocol):
 
     1. It must be callable, accepting a `Mapping` object and returning a
        boolean that indicates whether the value matches the query, and
-    2. it must have a stable hash that will be used for query caching.
-
+    2. it must have a stable hash that will be used for query caching."
     In addition, to mark a query as non-cacheable (e.g. if it involves
     some remote lookup) it needs to have a method called ``is_cacheable``
     that returns ``False``.
@@ -51,9 +50,9 @@ class QueryLike(Protocol):
     https://mypy.readthedocs.io/en/stable/protocols.html#simple-user-defined-protocols
     """
 
-    def __call__(self, value: Mapping) -> bool: ...
+    def __call__(self, value: Mapping) -> bool: ...  # pragma: no cover
 
-    def __hash__(self) -> int: ...
+    def __hash__(self) -> int: ...  # pragma: no cover
 
 
 class QueryInstance:

@@ -5,8 +5,15 @@ branch = True
 exclude_lines =
     pragma: no cover
     raise NotImplementedError.*
+    return NotImplemented
     warnings\.warn.*
-    def __repr__
-    def __str__
     def main()
     if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    except ImportError:
+    @overload
+    @abstractmethod
+
+include = asynctinydb/*
+
+omit = asynctinydb/mypy_plugin.py

@@ -1,3 +1,9 @@
+from asynctinydb.table import Document, IncreID, UUID
+from asynctinydb.storages import MemoryStorage, JSONStorage
+from asynctinydb.middlewares import Middleware, CachingMiddleware
+from asynctinydb.queries import QueryLike
+from asynctinydb import TinyDB, where, Query
+import asyncio
 import re
 from collections.abc import Mapping
 
@@ -5,12 +11,7 @@ import pytest
 import nest_asyncio
 nest_asyncio.apply()
 
-from asynctinydb import TinyDB, where, Query
-from asynctinydb.middlewares import Middleware, CachingMiddleware
-from asynctinydb.storages import MemoryStorage, JSONStorage
-from asynctinydb.table import Document
 
-@pytest.mark.asyncio
 async def test_drop_tables(db: TinyDB):
     await db.drop_tables()
 
@@ -19,7 +20,7 @@ async def test_drop_tables(db: TinyDB):
 
     assert len(db) == 0
 
-@pytest.mark.asyncio
+
 async def test_all(db: TinyDB):
     await db.drop_tables()
 
@@ -28,7 +29,7 @@ async def test_all(db: TinyDB):
 
     assert len(await db.all()) == 10
 
-@pytest.mark.asyncio
+
 async def test_insert(db: TinyDB):
     await db.drop_tables()
     await db.insert({'int': 1, 'char': 'a'})
@@ -44,13 +45,13 @@ async def test_insert(db: TinyDB):
     assert await db.count(where('int') == 1) == 3
     assert await db.count(where('char') == 'a') == 1
 
-@pytest.mark.asyncio
+
 async def test_insert_ids(db: TinyDB):
     await db.drop_tables()
     assert await db.insert({'int': 1, 'char': 'a'}) == 1
     assert await db.insert({'int': 1, 'char': 'a'}) == 2
 
-@pytest.mark.asyncio
+
 async def test_insert_with_doc_id(db: TinyDB):
     await db.drop_tables()
     assert await db.insert({'int': 1, 'char': 'a'}) == 1
@@ -58,7 +59,7 @@ async def test_insert_with_doc_id(db: TinyDB):
     assert await db.insert(Document({'int': 1, 'char': 'a'}, 77)) == 77
     assert await db.insert({'int': 1, 'char': 'a'}) == 78
 
-@pytest.mark.asyncio
+
 async def test_insert_with_duplicate_doc_id(db: TinyDB):
     await db.drop_tables()
     assert await db.insert({'int': 1, 'char': 'a'}) == 1
@@ -66,15 +67,15 @@ async def test_insert_with_duplicate_doc_id(db: TinyDB):
     with pytest.raises(ValueError):
         await db.insert(Document({'int': 1, 'char': 'a'}, 1))
 
-@pytest.mark.asyncio
+
 async def test_insert_multiple(db: TinyDB):
     await db.drop_tables()
     assert not await db.contains(where('int') == 1)
 
     # Insert multiple from list
     await db.insert_multiple([{'int': 1, 'char': 'a'},
-                        {'int': 1, 'char': 'b'},
-                        {'int': 1, 'char': 'c'}])
+                              {'int': 1, 'char': 'b'},
+                              {'int': 1, 'char': 'c'}])
 
     assert await db.count(where('int') == 1) == 3
     assert await db.count(where('char') == 'a') == 1
@@ -100,16 +101,16 @@ async def test_insert_multiple(db: TinyDB):
     for i in range(10):
         assert await db.count(where('int') == i) == 1
 
-@pytest.mark.asyncio
+
 async def test_insert_multiple_with_ids(db: TinyDB):
     await db.drop_tables()
 
     # Insert multiple from list
     assert await db.insert_multiple([{'int': 1, 'char': 'a'},
-                               {'int': 1, 'char': 'b'},
-                               {'int': 1, 'char': 'c'}]) == [1, 2, 3]
+                                     {'int': 1, 'char': 'b'},
+                                     {'int': 1, 'char': 'c'}]) == [1, 2, 3]
 
-@pytest.mark.asyncio
+
 async def test_insert_multiple_with_doc_ids(db: TinyDB):
     await db.drop_tables()
 
@@ -123,13 +124,13 @@ async def test_insert_multiple_with_doc_ids(db: TinyDB):
     with pytest.raises(ValueError):
         await db.insert_multiple([Document({'int': 1, 'char': 'a'}, 12)])
 
-@pytest.mark.asyncio
+
 async def test_insert_invalid_type_raises_error(db: TinyDB):
     with pytest.raises(ValueError, match='Document is not a Mapping'):
         # object() as an example of a non-mapping-type
         await db.insert(object())  # type: ignore
 
-@pytest.mark.asyncio
+
 async def test_insert_valid_mapping_type(db: TinyDB):
     class CustomDocument(Mapping):
         def __init__(self, data):
@@ -148,7 +149,7 @@ async def test_insert_valid_mapping_type(db: TinyDB):
     await db.insert(CustomDocument({'int': 1, 'char': 'a'}))
     assert await db.count(where('int') == 1) == 1
 
-@pytest.mark.asyncio
+
 async def test_custom_mapping_type_with_json(tmpdir):
     class CustomDocument(Mapping):
         def __init__(self, data):
@@ -184,35 +185,37 @@ async def test_custom_mapping_type_with_json(tmpdir):
     assert await db.count(where('int') == 3) == 0
     assert await db.count(where('int') == 4) == 1
 
-@pytest.mark.asyncio
+    await db.close()
+
+
 async def test_remove(db: TinyDB):
     await db.remove(where('char') == 'b')
 
     assert len(db) == 2
     assert await db.count(where('int') == 1) == 2
 
-@pytest.mark.asyncio
+
 async def test_remove_all_fails(db: TinyDB):
     with pytest.raises(RuntimeError):
         await db.remove()
 
-@pytest.mark.asyncio
+
 async def test_remove_multiple(db: TinyDB):
     await db.remove(where('int') == 1)
 
     assert len(db) == 0
 
-@pytest.mark.asyncio
+
 async def test_remove_ids(db: TinyDB):
     await db.remove(doc_ids=[1, 2])
 
     assert len(db) == 1
 
-@pytest.mark.asyncio
+
 async def test_remove_returns_ids(db: TinyDB):
     assert await db.remove(where('char') == 'b') == [2]
 
-@pytest.mark.asyncio
+
 async def test_update(db: TinyDB):
     assert len(db) == 3
 
@@ -221,7 +224,7 @@ async def test_update(db: TinyDB):
     assert await db.count(where('int') == 2) == 1
     assert await db.count(where('int') == 1) == 2
 
-@pytest.mark.asyncio
+
 async def test_update_all(db: TinyDB):
     assert await db.count(where('int') == 1) == 3
 
@@ -229,7 +232,7 @@ async def test_update_all(db: TinyDB):
 
     assert await db.count(where('newField') == True) == 3  # noqa
 
-@pytest.mark.asyncio
+
 async def test_update_returns_ids(db: TinyDB):
     await db.drop_tables()
     assert await db.insert({'int': 1, 'char': 'a'}) == 1
@@ -237,7 +240,7 @@ async def test_update_returns_ids(db: TinyDB):
 
     assert await db.update({'char': 'b'}, where('int') == 1) == [1, 2]
 
-@pytest.mark.asyncio
+
 async def test_update_transform(db: TinyDB):
     def increment(field):
         def transform(el):
@@ -260,13 +263,13 @@ async def test_update_transform(db: TinyDB):
     assert await db.count(where('char') == 'a') == 0
     assert await db.count(where('int') == 1) == 2
 
-@pytest.mark.asyncio
+
 async def test_update_ids(db: TinyDB):
     await db.update({'int': 2}, doc_ids=[1, 2])
 
     assert await db.count(where('int') == 2) == 2
 
-@pytest.mark.asyncio
+
 async def test_update_multiple(db: TinyDB):
     assert len(db) == 3
 
@@ -279,7 +282,7 @@ async def test_update_multiple(db: TinyDB):
     assert await db.count(where('int') == 2) == 1
     assert await db.count(where('int') == 4) == 1
 
-@pytest.mark.asyncio
+
 async def test_update_multiple_operation(db: TinyDB):
     def increment(field):
         def transform(el):
@@ -296,7 +299,7 @@ async def test_update_multiple_operation(db: TinyDB):
 
     assert await db.count(where('int') == 2) == 2
 
-@pytest.mark.asyncio
+
 async def test_upsert(db: TinyDB):
     assert len(db) == 3
 
@@ -307,7 +310,8 @@ async def test_upsert(db: TinyDB):
     # Document missing
     assert await db.upsert({'int': 9, 'char': 'x'}, where('char') == 'x') == [4]
     assert await db.count(where('int') == 9) == 1
-@pytest.mark.asyncio
+
+
 async def test_upsert_by_id(db: TinyDB):
     assert len(db) == 3
 
@@ -334,7 +338,7 @@ async def test_upsert_by_id(db: TinyDB):
     # Make sure we didn't break anything
     assert await db.insert({'check': '_next_id'}) == 6
 
-@pytest.mark.asyncio
+
 async def test_search(db: TinyDB):
     assert not db._query_cache
     assert len(await db.search(where('int') == 1)) == 3
@@ -342,7 +346,15 @@ async def test_search(db: TinyDB):
     assert len(db._query_cache) == 1
     assert len(await db.search(where('int') == 1)) == 3  # Query result from cache
 
-@pytest.mark.asyncio
+    class BlindQuery(QueryLike):
+        def __call__(self, doc):
+            return True
+
+        def __hash__(self):
+            return 114514
+    assert len(await db.search(BlindQuery())) == 3
+
+
 async def test_search_path(db: TinyDB):
     assert not db._query_cache
     assert len(await db.search(where('int').exists())) == 3
@@ -351,56 +363,58 @@ async def test_search_path(db: TinyDB):
     assert len(await db.search(where('asd').exists())) == 0
     assert len(await db.search(where('int').exists())) == 3  # Query result from cache
 
-@pytest.mark.asyncio
+
 async def test_search_no_results_cache(db: TinyDB):
     assert len(await db.search(where('missing').exists())) == 0
     assert len(await db.search(where('missing').exists())) == 0
 
-@pytest.mark.asyncio
+
 async def test_get(db: TinyDB):
     item = await db.get(where('char') == 'b')
     assert item is not None
     assert item['char'] == 'b'
+    with pytest.raises(ValueError):
+        await db.get(where('char') == 'x', doc_id=1)
 
-@pytest.mark.asyncio
+
 async def test_get_ids(db: TinyDB):
     el = (await db.all())[0]
     assert await db.get(doc_id=el.doc_id) == el
     assert await db.get(doc_id=float('NaN')) is None  # type: ignore
 
-@pytest.mark.asyncio
+
 async def test_get_invalid(db: TinyDB):
     with pytest.raises(RuntimeError):
         await db.get()
 
-@pytest.mark.asyncio
+
 async def test_count(db: TinyDB):
     assert await db.count(where('int') == 1) == 3
     assert await db.count(where('char') == 'd') == 0
 
-@pytest.mark.asyncio
+
 async def test_contains(db: TinyDB):
     assert await db.contains(where('int') == 1)
     assert not await db.contains(where('int') == 0)
 
-@pytest.mark.asyncio
+
 async def test_contains_ids(db: TinyDB):
     assert await db.contains(doc_id=1)
     assert await db.contains(doc_id=2)
     assert not await db.contains(doc_id=88)
 
-@pytest.mark.asyncio
+
 async def test_contains_invalid(db: TinyDB):
     with pytest.raises(RuntimeError):
         await db.contains()
 
-@pytest.mark.asyncio
+
 async def test_get_idempotent(db: TinyDB):
     u = await db.get(where('int') == 1)
     z = await db.get(where('int') == 1)
     assert u == z
 
-@pytest.mark.asyncio
+
 async def test_multiple_dbs():
     """
     Regression test for issue #3
@@ -417,7 +431,10 @@ async def test_multiple_dbs():
     assert len(db1) == 3
     assert len(db2) == 1
 
-@pytest.mark.asyncio
+    await db1.close()
+    await db2.close()
+
+
 async def test_storage_closed_once():
     class Storage:
         def __init__(self):
@@ -440,7 +457,7 @@ async def test_storage_closed_once():
     # If await db.close() is called during cleanup, the assertion will fail and throw
     # and exception
 
-@pytest.mark.asyncio
+
 async def test_unique_ids(tmpdir):
     """
     :type tmpdir: py._path.local.LocalPath
@@ -470,7 +487,7 @@ async def test_unique_ids(tmpdir):
         ids = [e.doc_id for e in await db.all()]
         assert len(ids) == len(set(ids))
 
-@pytest.mark.asyncio
+
 async def test_lastid_after_open(tmpdir):
     """
     Regression test for issue #34
@@ -485,9 +502,9 @@ async def test_lastid_after_open(tmpdir):
         await db.insert_multiple({'i': i} for i in range(NUM))
 
     async with TinyDB(path) as db:
-        assert await db._get_next_id() - 1 == NUM
+        assert db._get_next_id((await db._read_table()).keys()) - 1 == NUM
 
-@pytest.mark.asyncio
+
 async def test_doc_ids_json(tmpdir):
     """
     Regression test for issue #45
@@ -502,8 +519,8 @@ async def test_doc_ids_json(tmpdir):
 
         await db.drop_tables()
         assert await db.insert_multiple([{'int': 1, 'char': 'a'},
-                                    {'int': 1, 'char': 'b'},
-                                    {'int': 1, 'char': 'c'}]) == [1, 2, 3]
+                                         {'int': 1, 'char': 'b'},
+                                         {'int': 1, 'char': 'c'}]) == [1, 2, 3]
 
         assert await db.contains(doc_id=1)
         assert await db.contains(doc_id=2)
@@ -519,7 +536,7 @@ async def test_doc_ids_json(tmpdir):
         await db.remove(doc_ids=[1, 2])
         assert len(db) == 1
 
-@pytest.mark.asyncio
+
 async def test_insert_string(tmpdir):
     path = str(tmpdir.join('db.json'))
 
@@ -537,7 +554,7 @@ async def test_insert_string(tmpdir):
 
         await db.insert({'int': 3})  # Does not fail
 
-@pytest.mark.asyncio
+
 async def test_insert_invalid_dict(tmpdir):
     path = str(tmpdir.join('db.json'))
 
@@ -546,13 +563,13 @@ async def test_insert_invalid_dict(tmpdir):
         await db.insert_multiple(data)
 
         with pytest.raises(TypeError):
-            await db.insert({'int': db})  # Fails
+            await db.insert({'int': pytest})  # Fails
 
         assert data == await db.all()
 
         await db.insert({'int': 3})  # Does not fail
 
-@pytest.mark.asyncio
+
 async def test_gc(tmpdir):
     # See https://github.com/msiemens/asynctinydb/issues/92
     path = str(tmpdir.join('db.json'))
@@ -564,7 +581,7 @@ async def test_gc(tmpdir):
     assert await table.all() == [{'something': 'else'}, {'int': 13}]
     await db.close()
 
-@pytest.mark.asyncio
+
 async def test_drop_table():
     db = TinyDB(storage=MemoryStorage)
     default_table_name = db.table(db.default_table_name).name
@@ -589,8 +606,9 @@ async def test_drop_table():
 
     await db.drop_table('non-existent-table-name')
     assert set() == await db.tables()
+    await db.close()
 
-@pytest.mark.asyncio
+
 async def test_empty_write(tmpdir):
     path = str(tmpdir.join('db.json'))
 
@@ -601,7 +619,7 @@ async def test_empty_write(tmpdir):
     await TinyDB(path).close()
     await TinyDB(path, storage=ReadOnlyMiddleware(JSONStorage)).close()
 
-@pytest.mark.asyncio
+
 async def test_query_cache():
     db = TinyDB(storage=MemoryStorage)
     await db.insert_multiple([
@@ -623,12 +641,13 @@ async def test_query_cache():
     # Make sure we got an independent copy of the result list
     results.extend([1])
     assert await db.search(query) == [{'name': 'foo', 'value': 42}]
+    await db.close()
 
-@pytest.mark.asyncio
+
 async def test_asynctinydb_is_iterable(db: TinyDB):
     assert [r async for r in db] == await db.all()
 
-@pytest.mark.asyncio
+
 async def test_repr(tmpdir):
     path = str(tmpdir.join('db.json'))
 
@@ -642,42 +661,46 @@ async def test_repr(tmpdir):
         r"default_table_documents_count=1, "
         r"all_tables_documents_count=\[\'_default=1\'\]>",
         repr(db))
+    await db.close()
 
-@pytest.mark.asyncio
+
 async def test_delete(tmpdir):
     path = str(tmpdir.join('db.json'))
 
     db = TinyDB(path, ensure_ascii=False)
     q = Query()
     await db.insert({'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
-                           'ticker': 'mkay'}})
+                                 'ticker': 'mkay'}})
     assert await db.search(q.network.id == '114') == [
         {'network': {'id': '114', 'name': 'ok', 'rpc': 'dac',
                      'ticker': 'mkay'}}
     ]
     await db.remove(q.network.id == '114')
     assert await db.search(q.network.id == '114') == []
+    await db.close()
 
-@pytest.mark.asyncio
+
 async def test_insert_multiple_with_single_dict(db: TinyDB):
     with pytest.raises(ValueError):
         d = {'first': 'John', 'last': 'smith'}
         await db.insert_multiple(d)  # type: ignore
         await db.close()
 
-@pytest.mark.asyncio
+
 async def test_access_storage():
     assert isinstance(TinyDB(storage=MemoryStorage).storage,
                       MemoryStorage)
-    assert isinstance(TinyDB(storage=CachingMiddleware(MemoryStorage)).storage,
+    db = TinyDB(storage=CachingMiddleware(MemoryStorage))
+    assert isinstance(db.storage,
                       CachingMiddleware)
 
-@pytest.mark.asyncio
+
 async def test_empty_db_len():
     db = TinyDB(storage=MemoryStorage)
     assert len(db) == 0
+    await db.close()
 
-@pytest.mark.asyncio
+
 async def test_insert_on_existing_db(tmpdir):
     path = str(tmpdir.join('db.json'))
 
@@ -694,18 +717,103 @@ async def test_insert_on_existing_db(tmpdir):
 
     assert len(db) == 3
 
-@pytest.mark.asyncio
+    await db.close()
+
+
+def test_syncwait_methods(tmpdir):
+    db = TinyDB(str(tmpdir.join('db.json')))
+    len(db)  # syncwait
+    str(db)
+    loop = asyncio.get_event_loop()
+
+    async def test():
+        await db.insert({'foo': 'bar'})
+        assert len(db) == 1
+        await db.close()
+    loop.run_until_complete(test())
+
+
 async def test_storage_access():
     db = TinyDB(storage=MemoryStorage)
 
     assert isinstance(db.storage, MemoryStorage)
 
-@pytest.mark.asyncio
+    tab = db.table('foo')
+    assert tab.storage is db.storage
+    await db.close()
+
+
 async def test_lambda_query():
     db = TinyDB(storage=MemoryStorage)
     await db.insert({'foo': 'bar'})
 
-    query = lambda doc: doc.get('foo') == 'bar'
+    def query(doc): return doc.get('foo') == 'bar'
     query.is_cacheable = lambda: False
     assert await db.search(query) == [{'foo': 'bar'}]
     assert not db._query_cache
+    await db.close()
+
+
+async def test_closed_db():
+    db = TinyDB(storage=MemoryStorage)
+    await db.insert({'foo': 'bar'})
+    await db.close()
+    await db.close()  # Should not raise
+
+    with pytest.raises(IOError):
+        db.table("foo")
+
+    with pytest.raises(IOError):
+        await db.tables()
+
+    with pytest.raises(IOError):
+        await db.drop_table("foo")
+
+    with pytest.raises(IOError):
+        await db.drop_tables()
+
+
+async def test_id_classes():
+    db = TinyDB(storage=MemoryStorage)
+    tab0 = db.table("foo")
+    await tab0.insert({'foo': 'bar'})
+    tab1 = db.table("IncreID", document_id_class=IncreID)
+    await tab1.insert({'foo': 'bar'})
+    assert type((await tab1.get(Query().foo == 'bar')).doc_id) is IncreID
+    tab2 = db.table("UUID", document_id_class=UUID)
+    _id = await tab2.insert({'foo': 'bar'})
+    await tab2.update({'foo': 'baz'}, doc_ids=[_id])
+    assert type((await tab2.get(Query().foo == 'baz')).doc_id) is UUID
+
+    # Altering classes of existing tables is not allowed
+    with pytest.raises(ValueError):
+        db.table("foo", document_id_class=UUID)
+    await db.close()
+
+
+async def test_isolevel():
+    db = TinyDB(storage=MemoryStorage)
+    assert db.isolevel == 1
+    tabs = [db.table(n) for n in "abcd"]
+
+    assert all(tab._isolevel == 1 for tab in tabs)
+
+    db.isolevel = 2
+
+    tabs.append(db.table("e"))
+
+    assert db.isolevel == 2
+    assert all(tab._isolevel == 2 for tab in tabs)
+    doc = {
+        "inner": {
+            "list": [1, 2, 3],
+        }
+    }
+    _id = await db.insert(doc)
+    assert await db.get(doc_id=_id) == doc
+    doc["inner"]["new"] = "value"
+    doc["inner"]["list"].append(4)
+    assert (await db.get(doc_id=_id))["inner"]["list"] == [1, 2, 3]
+    with pytest.raises(KeyError):
+        (await db.get(doc_id=_id))["inner"]["new"]
+    await db.close()

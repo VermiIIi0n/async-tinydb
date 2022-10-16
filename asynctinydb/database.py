@@ -2,19 +2,20 @@
 This module contains the main component of TinyDB: the database.
 """
 
-from typing import AsyncGenerator, Dict, Set, Type
+from __future__ import annotations
+from typing import AsyncGenerator, Type, overload, TypeVar, Generic
 
-from . import JSONStorage
-from .storages import Storage
-from .table import Table, Document, IncreID
+from .storages import Storage, JSONStorage
+from .table import Table, Document, IncreID, IDVar, DocVar, BaseDocument
 from .utils import with_typehint, sync_await
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
 TableBase: Type[Table] = with_typehint(Table)
+_S = TypeVar("_S", bound=Storage)
 
 
-class TinyDB(TableBase):
+class TinyDB(Generic[_S], TableBase):
     """
     The main class of TinyDB.
 
@@ -77,28 +78,45 @@ class TinyDB(TableBase):
     #: The name of the default table
     #:
     #: .. versionadded:: 4.0
-    default_table_name = '_default'
+    default_table_name = "_default"
 
     #: The class that will be used by default to create storage instances
     #:
     #: .. versionadded:: 4.0
     default_storage_class = JSONStorage
 
-    def __init__(self, *args, **kwargs) -> None:
+    @overload
+    def __init__(self: TinyDB[_S], *args, storage: Type[_S], **kw) -> None:
+        ...
+
+    @overload
+    def __init__(self: TinyDB[Storage], *args, storage, **kw) -> None:
+        ...
+
+    @overload
+    def __init__(self: TinyDB[JSONStorage], *args, **kw) -> None:
+        ...
+
+    def __init__(self, *args, **kw) -> None:
         """
         Create a new instance of TinyDB.
+        * `storage`: The class of the storage to use.
+        * `no_dbcache`: If set to ``True``, the DB-level cache will be disabled.
+        * `isolevel`: The isolation level to use for the database.
         """
 
-        storage = kwargs.pop('storage', self.default_storage_class)
+        self._isolevel = kw.pop("isolevel", 1)
+        self._no_dbcache: bool = kw.pop("no_dbcache", False)
 
         # Prepare the storage
-        self._storage: Storage = storage(*args, **kwargs)
+        self._storage: _S = kw.pop(
+            "storage", type(self).default_storage_class)(*args, **kw)
 
         self._opened = True
-        self._tables: Dict[str, Table] = {}
+        self._tables: dict[str, Table] = {}
 
     def __repr__(self):
-        tables = sync_await(self.tables(), self.loop)
+        tables = sync_await(self.tables())
         args = [
             f"tables={list(tables)}",
             f"tables_count={len(tables)}",
@@ -109,11 +127,25 @@ class TinyDB(TableBase):
 
         return f"<{type(self).__name__} {', '.join(args)}>"
 
-    def table(self, name: str,
-              cache_size: int = 10,
-              document_id_class=IncreID,
-              document_class=Document,
-              **kw) -> Table:
+    @overload
+    def table(self, name: str, cache_size: int = 10, *,
+              document_id_class: Type[IDVar],
+              document_class: Type[DocVar], **kw) -> Table[IDVar, DocVar]: ...
+
+    @overload
+    def table(self, name: str, cache_size: int = 10, *,
+              document_id_class: Type[IDVar], **kw) -> Table[IDVar, Document]: ...
+
+    @overload
+    def table(self, name: str, cache_size: int = 10, *,
+              document_class: Type[DocVar], **kw) -> Table[IncreID, DocVar]: ...
+
+    @overload
+    def table(self, name: str, cache_size: int = 10,
+              **kw) -> Table[IncreID, Document]: ...
+
+    def table(self, name, cache_size=10, *,
+              document_id_class=None, document_class=None, **kw):
         """
         Get access to a specific table.
 
@@ -125,24 +157,39 @@ class TinyDB(TableBase):
         by default is :class:`~tinydb.table.Table`. Check its documentation
         for further parameters you can pass.
 
-        :param name: The name of the table.
-        :param kwargs: Keyword arguments to pass to the table class constructor
+        * `name`: The name of the table.
+        * `cache_size`: The size of the cache used to store the query results.
+        * `document_id_class`: By default :class:`~asynctinydb.IncreID` is used.
+        * `document_class`: By default :class:`~asynctinydb.Document` is used.
+        * `kw`: Keyword arguments to pass to the table class constructor
         """
 
         if not self._opened:
             raise IOError('Database is closed')
+
         if name in self._tables:
-            return self._tables[name]
+            table = self._tables[name]
+            if (document_id_class is not None and
+                    document_id_class is not table.document_id_class
+                or document_class is not None and
+                    document_class is not table.document_class):
+                raise ValueError(
+                    f"Table {name} already exists with different "
+                    "document_id_class or document_class"
+                )
+            return table
 
         kw["cache_size"] = cache_size
-        kw["document_id_class"] = document_id_class
-        kw["document_class"] = document_class
+        kw["no_dbcache"] = self._no_dbcache
+        kw["document_id_class"] = document_id_class or IncreID
+        kw["document_class"] = document_class or Document
         table = self.table_class(self.storage, name, **kw)
+        table._isolevel = self._isolevel
         self._tables[name] = table
 
         return table
 
-    async def tables(self) -> Set[str]:
+    async def tables(self) -> set[str]:
         """
         Get the names of all tables in the database.
 
@@ -168,7 +215,7 @@ class TinyDB(TableBase):
         # so we need to consider this case to and return an empty set in this
         # case.
         if not self._opened:
-            raise IOError('Database is closed')
+            raise IOError("Database is closed")
 
         return set((await self.storage.read()) or {})
 
@@ -200,7 +247,7 @@ class TinyDB(TableBase):
         """
 
         if not self._opened:
-            raise IOError('Database is closed')
+            raise IOError("Database is closed")
 
         # If the table is currently opened, we need to forget the table class
         # instance
@@ -224,14 +271,31 @@ class TinyDB(TableBase):
         await self.storage.write(data)
 
     @property
-    def storage(self) -> Storage:
+    def storage(self) -> _S:
         """
         Get the storage instance used for this TinyDB instance.
 
         :return: This instance's storage
-        :rtype: Storage
         """
         return self._storage
+
+    @property
+    def isolevel(self) -> int:
+        """
+        Get the isolation level used for this TinyDB instance.
+
+        * `0`: No isolation
+        * `1`: Serialised CRUD operations (default) (thread-safe)
+
+        :return: This instance's isolation level
+        """
+        return self._isolevel
+
+    @isolevel.setter
+    def isolevel(self, value: int) -> None:
+        for tab in self._tables.values():
+            tab._isolevel = value
+        self._isolevel = value
 
     async def close(self) -> None:
         """
@@ -248,8 +312,11 @@ class TinyDB(TableBase):
 
         Upon leaving this context, the ``close`` method will be called.
         """
-        self._opened = False
-        await self.storage.close()
+        if self._opened:
+            self._opened = False
+            for tab in self._tables.values():
+                await tab.close()
+            await self.storage.close()
 
     async def __aenter__(self):
         """
@@ -289,7 +356,7 @@ class TinyDB(TableBase):
         """
         return len(self.table(self.default_table_name))
 
-    def __aiter__(self) -> AsyncGenerator[Document, None]:
+    def __aiter__(self) -> AsyncGenerator[BaseDocument, None]:
         """
         Return an iterator for the default table's documents.
         """

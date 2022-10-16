@@ -19,18 +19,26 @@ doc = {'none': [None, None], 'int': 42, 'float': 3.1415899999999999,
        'dict': {'hp': 13, 'sp': 5},
        'bool': [True, False, True, False]}
 
-@pytest.mark.asyncio
+
 async def test_json(tmpdir):
     # Write contents
     path = str(tmpdir.join('test.db'))
     storage = JSONStorage(path)
     await storage.write(doc)
 
+    a = {}
+    a['a'] = a
+    with pytest.raises(OverflowError):
+        await storage.write(a)
+
     # Verify contents
+    assert doc == await storage.read()
+    assert doc == await storage.read()  # Read again
+    await storage.write(doc)  # Write again
     assert doc == await storage.read()
     await storage.close()
 
-@pytest.mark.asyncio
+
 async def test_json_kwargs(tmpdir):
     db_file = tmpdir.join('test.db')
     db = TinyDB(str(db_file), sort_keys=True, indent=4)
@@ -51,7 +59,7 @@ async def test_json_kwargs(tmpdir):
 }'''
     await db.close()
 
-@pytest.mark.asyncio
+
 async def test_json_readwrite(tmpdir):
     """
     Regression test for issue #1
@@ -81,7 +89,7 @@ async def test_json_readwrite(tmpdir):
 
     await db.close()
 
-@pytest.mark.asyncio
+
 async def test_json_read(tmpdir):
     r"""Open a database only for reading"""
     path = str(tmpdir.join('test.db'))
@@ -100,7 +108,7 @@ async def test_json_read(tmpdir):
         await db.insert({'c': 1})  # writing is not
     await db.close()
 
-@pytest.mark.asyncio
+
 async def test_create_dirs():
     temp_dir = tempfile.gettempdir()
 
@@ -112,7 +120,7 @@ async def test_create_dirs():
             break
 
     with pytest.raises(IOError):
-        JSONStorage(db_file)
+        await JSONStorage(db_file).read()
 
     await JSONStorage(db_file, create_dirs=True).close()
     assert os.path.exists(db_file)
@@ -124,13 +132,13 @@ async def test_create_dirs():
     os.remove(db_file)
     os.rmdir(db_dir)
 
-@pytest.mark.asyncio
+
 async def test_json_invalid_directory():
     with pytest.raises(IOError):
-        async with TinyDB('/this/is/an/invalid/path/db.json', storage=JSONStorage):
-            pass
+        async with TinyDB('/this/is/an/invalid/path/db.json', storage=JSONStorage) as db:
+            await db.insert({'a': 1})
 
-@pytest.mark.asyncio
+
 async def test_in_memory():
     # Write contents
     storage = MemoryStorage()
@@ -144,10 +152,11 @@ async def test_in_memory():
     await other.write({})
     assert (await other.read()) != await storage.read()
 
-@pytest.mark.asyncio
+
 async def test_in_memory_close():
     async with TinyDB(storage=MemoryStorage) as db:
         await db.insert({})
+
 
 def test_custom():
     # noinspection PyAbstractClass
@@ -157,7 +166,7 @@ def test_custom():
     with pytest.raises(TypeError):
         MyStorage()
 
-@pytest.mark.asyncio
+
 async def test_read_once():
     count = 0
 
@@ -192,13 +201,13 @@ async def test_read_once():
 
         await db.insert({'foo': 'bar'})
 
-        assert count == 2 # One for all(), one for the insert
+        assert count == 2  # One for all(), one for the insert
 
         await db.all()
 
-        assert count == 2 # Using cached data, no extra read
+        assert count == 2  # Using cached data, no extra read
 
-@pytest.mark.asyncio
+
 async def test_custom_with_exception():
     class MyStorage(Storage):
         @property
@@ -221,7 +230,7 @@ async def test_custom_with_exception():
         async with TinyDB(storage=MyStorage) as db:
             pass
 
-@pytest.mark.asyncio
+
 async def test_yaml(tmpdir):
     """
     :type tmpdir: py._path.local.LocalPath
@@ -254,9 +263,9 @@ async def test_yaml(tmpdir):
                 return data
 
         async def write(self, data):
-            data = {k: ({str(_id): v for _id, v in tab.items()} 
-                    if hasattr(tab, "items") else tab) 
-                for k, tab in data.items()}
+            data = {k: ({str(_id): v for _id, v in tab.items()}
+                    if hasattr(tab, "items") else tab)
+                    for k, tab in data.items()}
             with open(self.filename, 'w') as handle:
                 yaml.dump(data, handle)
 
@@ -276,7 +285,7 @@ async def test_yaml(tmpdir):
     assert await db.contains(where('name') == 'foo')
     assert len(db) == 1
 
-@pytest.mark.asyncio
+
 async def test_encoding(tmpdir):
     japanese_doc = {"Test": u"こんにちは世界"}
 
@@ -298,15 +307,17 @@ async def test_encoding(tmpdir):
     jap_storage = JSONStorage(path, encoding="cp936")
     assert japanese_doc == await jap_storage.read()
 
-@pytest.mark.asyncio
+
 async def test_storage_event_hooks(tmpdir):
     data = {"ab": 42}
 
     path = str(tmpdir.join('test.db'))
     storage = JSONStorage(path)
+
     @storage.on.write.pre
     async def mul(ev: str, s: Storage, d: dict):
         d["ab"] *= 2  # should change 'ab' to 84
+
     @storage.on.write.post  # Make sure returning None won't overwrite the data
     async def no_return(*args):
         ...
@@ -317,23 +328,35 @@ async def test_storage_event_hooks(tmpdir):
         ...
     with pytest.raises(EXC):
         storage = JSONStorage(path)
+
         @storage.on.read.pre
         async def r(*arg):
             raise EXC()
         await storage.read()
 
     storage = JSONStorage(path)
+
     @storage.on.read.post
     async def subs(ev: str, s: Storage, d: dict):
         d["ab"] -= 2  # should change 'ab' to 82
     assert {"ab": 82} == await storage.read()
 
     storage.event_hook.clear_actions()
-    
+
     @storage.on.read.pre
     async def inject(ev, s, string):
         return "{\"ab\": 114}"
     assert {"ab": 114} == await storage.read()
+
+    closed = False
+
+    @storage.on.close
+    async def close(*args):
+        nonlocal closed
+        closed = True
+
+    await storage.close()
+    assert closed
 
     # Should raise an error because this event doesn't exist
     with pytest.raises(AttributeError):
@@ -343,41 +366,115 @@ async def test_storage_event_hooks(tmpdir):
     # Test multiple modifiers
     storage.event_hook.clear_actions()
 
-@pytest.mark.asyncio
+
 async def test_file_closed():
     with tempfile.TemporaryDirectory() as tmpdir:
-        storage = JSONStorage(os.path.join(tmpdir,'test.json'))
+        storage = JSONStorage(os.path.join(tmpdir, 'test.json'))
         await storage.read()
         await storage.close()
-        assert storage._handle.closed
+        assert storage.closed
+        await storage.close()  # Shouldn't raise an error
         with pytest.raises(IOError):
             await storage.read()
+        with pytest.raises(IOError):
+            await storage.write({})
 
-@pytest.mark.asyncio
+
+# async def test_multi_files(tmpdir):
+#    for _ in range(1024):
+#        path = str(tmpdir.join('test.db'))
+#        async with TinyDB(path, storage=JSONStorage) as db:
+#            await db.insert(doc)
+#            assert [doc] == await db.all()
+#            await db.drop_tables()
+#            await db.close()
+
+
 async def test_encrypted_json(tmpdir):
     key = "asdfghjklzxcvbnm"
+    with pytest.raises(ValueError):  # Not binary mode
+        EncryptedJSONStorage("test.json", key, access_mode="r+")
+    with pytest.raises(ValueError):
+        EncryptedJSONStorage("asdf")  # No key provided
     storage = EncryptedJSONStorage(str(tmpdir.join('test.db')), key=key)
     doc = {"foo": "bar"}
     await storage.write(doc)
     assert doc == await storage.read()
 
-@pytest.mark.asyncio
+    # Re open the encrypted file, and test bytes-as-key
+    storage = EncryptedJSONStorage(str(tmpdir.join('test.db')), key=key.encode("utf-8"),
+                                   encryption=Modifier.Encryption.AES_GCM,
+                                   compression=Modifier.Compression.brotli)
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+
+    @storage.on.write.post
+    async def to_str(ev, s, d):
+        """Test encryption with a string"""
+        return d.decode("utf-8")
+
+    @storage.on.read.pre
+    async def to_bytes(ev, s, d):
+        return d.encode("utf-8")
+
+    with pytest.warns(DeprecationWarning):
+        Modifier.add_encryption(storage, key)
+        Modifier.add_encryption(storage, key, encoding="utf-8")
+
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+
 async def test_compress_brotli(tmpdir):
     storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
     Modifier.Compression.brotli(storage)
     doc = {str(i): i for i in range(10000)}
     await storage.write(doc)
     assert doc == await storage.read()
+    await storage.close()
 
-@pytest.mark.asyncio
+    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+
+    @storage.on.write.post
+    async def to_str(ev, s, d):
+        """Test encryption with a string"""
+        return d.decode("utf-8")
+
+    @storage.on.read.pre
+    async def to_bytes(ev, s, d):
+        return d.encode("utf-8")
+
+    Modifier.Compression.brotli(storage)
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+
 async def test_compress_blosc2(tmpdir):
     storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
     Modifier.Compression.blosc2(storage)
     doc = {str(i): i for i in range(10000)}
     await storage.write(doc)
     assert doc == await storage.read()
+    await storage.close()
 
-@pytest.mark.asyncio
+    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+
+    @storage.on.write.post
+    async def to_str(ev, s, d):
+        """Test encryption with a string"""
+        return d.decode("utf-8")
+
+    @storage.on.read.pre
+    async def to_bytes(ev, s, d):
+        return d.encode("utf-8")
+
+    Modifier.Compression.blosc2(storage)
+    await storage.write(doc)
+    assert doc == await storage.read()
+
+
 async def test_extended_json(tmpdir):
     storage = JSONStorage(str(tmpdir.join('test.db')))
     Modifier.Conversion.ExtendedJSON(storage)
@@ -404,7 +501,40 @@ async def test_extended_json(tmpdir):
     await storage.write(doc)
     assert doc == await storage.read()
 
-    with pytest.raises(RecursionError):
+    with pytest.raises(ValueError):
         d = {}
         d["doc"] = d
         await storage.write(d)
+
+    storage.event_hook.clear_actions()
+
+    # Test type_hooks and marker_hooks
+    class Dummy:
+        def __init__(self, value) -> None:
+            self.value = value
+
+    class MySet(set):
+        pass
+
+    type_hooks = {
+        Dummy: lambda d, c: {"$dummy": d.value},
+        tuple: None,
+    }
+    marker_hooks = {"$dummy": lambda d, c: Dummy(d["$dummy"]), "$complex": None}
+    Modifier.Conversion.ExtendedJSON(
+        storage, type_hooks=type_hooks, marker_hooks=marker_hooks)
+
+    doc = {
+        "foo": Dummy("bar"),
+        "bar": (1, 2, 3),
+        "baz": MySet([1, 2, 3]),
+        "complex": 1 + 2j, }
+
+    await storage.write(doc)
+    r = await storage.read()
+    assert r["foo"].value == "bar"
+    assert not isinstance(r["bar"], tuple)
+    assert r["bar"] == [1, 2, 3]
+    assert type(r["baz"]) is set
+    assert r["baz"] == {1, 2, 3}
+    assert r["complex"] == {"$complex": [1., 2.]}

@@ -13,9 +13,9 @@ Currently only supports json storage events: `write.pre`, `write.post`, `read.pr
 * `write.post` is called after json dumping, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).  
   Return non `None` value will overwrite data to be saved[^1].
 * `read.pre` is called before json loading, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).  
-  Return non `None` value will overwrite data to be read.
+  Return non `None` value will overwrite data to be read. **Actions executed in reversed order**
 * `read.post` is called after json loading, args: `str`(event name), `Storage`, `dict`(data).  
-  Return non `None` value will overwrite data to be read.
+  Return non `None` value will overwrite data to be read. **Actions executed in reversed order**
 * `close` is called when the storage is closed, args: `str`(event name), `Storage`.
 
 ```Python

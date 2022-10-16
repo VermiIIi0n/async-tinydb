@@ -5,27 +5,21 @@ data in TinyDB.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-import asyncio
 import uuid
-from typing import (
-    AsyncGenerator,
-    overload,
-    Callable,
-    Iterable,
-    Mapping,
-    Generic,
-    cast,
-    TypeVar,
-    Type,
-    Any
-)
+from copy import deepcopy
+from typing import TYPE_CHECKING, AsyncGenerator, Collection, MutableMapping
+from typing import overload, Callable, Iterable
+from typing import Mapping, Generic, cast, TypeVar, Type, Any, ParamSpec
 from .queries import QueryLike
 from .storages import Storage
-from .utils import LRUCache, arun_parallel, ensure_async, sync_await, get_executor
+from .utils import LRUCache, sync_await, AsinkRunner
+from .utils import async_run
 
-__all__ = ('Document', 'Table', 'BaseID', 'IncreID', 'BaseDocument')
-IDVar = TypeVar('IDVar', bound="BaseID")
-DocVar = TypeVar('DocVar', bound="BaseDocument")
+__all__ = ("Document", "Table", "IncreID")
+IDVar = TypeVar("IDVar", bound="BaseID")
+DocVar = TypeVar("DocVar", bound="BaseDocument")
+ARGS = ParamSpec("ARGS")
+V = TypeVar("V")
 
 
 class BaseID(ABC):
@@ -48,20 +42,26 @@ class BaseID(ABC):
 
     @classmethod
     @abstractmethod
-    def next_id(cls, table: Table):
-        """Get the next ID for the given table. Can be defined as an async func."""
+    def next_id(cls: Type[IDVar], table: Table, keys: Collection[IDVar]) -> IDVar:
+        """
+        Get the next ID for the given table.
+        """
         raise NotImplementedError()
 
     @classmethod
     @abstractmethod
-    def mark_existed(cls, table: Table, new_id):
-        """Mark the given id as existed. Can be defined as an async func."""
+    def mark_existed(cls: Type[IDVar], table: Table, new_id: IDVar):
+        """
+        Mark the given id as existed.
+        """
         raise NotImplementedError()
 
     @classmethod
     @abstractmethod
     def clear_cache(cls, table: Table):
-        """Clear the ID cache for a table. CANNOT be defined as an async func."""
+        """
+        Clear the ID cache for a table.
+        """
         raise NotImplementedError()
 
 
@@ -71,35 +71,25 @@ class IncreID(int, BaseID):
 
     __init__ = int.__init__
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, IncreID):
-            return int(self) == int(other)
-        if isinstance(other, (int, float)):
-            return int(self) == other
-        return False
-
     def __hash__(self):
         return hash(int(self))
 
     @classmethod
-    async def next_id(cls, table: Table) -> IncreID:
+    def next_id(cls, table: Table, keys: Collection[IncreID]) -> IncreID:
         # If we already know the next ID
         if table.name in cls._cache:
             new = cls(cls._cache[table.name])
             cls._cache[table.name] += 1
             return new
 
-        # Read the table documents
-        docs = await table._read_table()
-
         # If the table is empty, set the initial ID
-        if not docs:
+        if not keys:
             next_id = 1
             cls._cache[table.name] = next_id + 1
             return cls(next_id)
 
         # Determine the next ID based on the maximum ID that's currently in use
-        max_id = max(int(i) for i in docs.keys())
+        max_id = max(keys)
         next_id = max_id + 1
 
         # The next ID we wil return AFTER this call needs to be larger than
@@ -128,26 +118,28 @@ class UUID(uuid.UUID, BaseID):
         return uuid.UUID.__hash__(self)
 
     @classmethod
-    async def next_id(cls, table: Table) -> UUID:
+    def next_id(cls, table: Table, keys: Collection[UUID]) -> UUID:
         if table.name not in cls._cache:
             cls._cache[table.name] = set()
         while True:
             new_id = cls(uuid.uuid4())
-            if new_id not in cls._cache[table.name] and \
-                    not await table.contains(doc_id=new_id):
+            if (new_id not in cls._cache[table.name]  # pragma: no branch
+                    and new_id not in keys):
                 cls._cache[table.name].add(new_id)
                 return new_id
 
     @classmethod
-    async def mark_existed(cls, table: Table, new_id: UUID):
-        cls._cache[table.name].add(new_id)
+    def mark_existed(cls, table: Table, new_id: UUID):
+        cache = cls._cache.get(table.name, set())
+        cache.add(new_id)
+        cls._cache[table.name] = cache
 
     @classmethod
     def clear_cache(cls, table: Table):
         cls._cache.pop(table.name, None)
 
 
-class BaseDocument(Mapping[IDVar, Any]):
+class BaseDocument(MutableMapping[IDVar, Any]):
     @property
     @abstractmethod
     def doc_id(self) -> IDVar:
@@ -195,37 +187,9 @@ class Table(Generic[IDVar, DocVar]):
         The query cache is updated on every search operation. When writing
         data, the whole cache is discarded as the query results may have
         changed.
-
-    .. admonition:: Customization
-
-        For customization, the following class variables can be set:
-
-        - ``document_class`` defines the class that is used to represent
-          documents,
-        - ``document_id_class`` defines the class that is used to represent
-          document IDs,
-        - ``query_cache_class`` defines the class that is used for the query
-          cache
-        - ``default_query_cache_capacity`` defines the default capacity of
-          the query cache
-
-        .. versionadded:: 4.0
-
-
-    :param storage: The storage instance to use for this table
-    :param name: The table name
-    :param cache_size: Maximum capacity of query cache
     """
 
     #: The class used to represent documents
-    #:
-    #: .. versionadded:: 4.0
-    # document_class = Document
-
-    #: The class used to represent a document ID
-    #:
-    #: .. versionadded:: 4.0
-    # document_id_class = IncreID  # moved to __init__
 
     #: The class used for caching query results
     #:
@@ -240,31 +204,31 @@ class Table(Generic[IDVar, DocVar]):
 
     @overload
     def __init__(self: Table[IncreID, Document], storage: Storage, name: str,
-                 cache_size: int = default_query_cache_capacity): ...
+                 cache_size=default_query_cache_capacity, *, no_dbcache=False): ...
 
     @overload
     def __init__(self: Table[IncreID, DocVar], storage: Storage, name: str,
-                 cache_size: int = default_query_cache_capacity, 
-                 *, document_class: Type[DocVar]): ...
+                 cache_size=default_query_cache_capacity,
+                 *, document_class: Type[DocVar], no_dbcache=False): ...
 
     @overload
     def __init__(self: Table[IDVar, Document], storage: Storage, name: str,
-                 cache_size: int = default_query_cache_capacity, 
-                 *, document_id_class: Type[IDVar]): ...
+                 cache_size=default_query_cache_capacity,
+                 *, document_id_class: Type[IDVar], no_dbcache=False): ...
 
     @overload
     def __init__(self: Table[IDVar, DocVar], storage: Storage, name: str,
-                 cache_size: int = default_query_cache_capacity,
-                 *, document_id_class: Type[IDVar], document_class: Type[DocVar],
-                 ):
-        ...
+                 cache_size=default_query_cache_capacity, *, no_dbcache=False,
+                 document_id_class: Type[IDVar], document_class: Type[DocVar],
+                 ): ...
 
     def __init__(
         self,
         storage: Storage,
         name: str,
-        cache_size: int = default_query_cache_capacity,
+        cache_size=default_query_cache_capacity,
         *,
+        no_dbcache=False,
         document_id_class=IncreID,
         document_class=Document,
     ):
@@ -273,7 +237,11 @@ class Table(Generic[IDVar, DocVar]):
         """
 
         self.document_id_class = document_id_class
+        """The class used for document IDs in this table."""
         self.document_class = document_class
+        """The class used to represent documents in this table."""
+        self.no_dbcache = no_dbcache
+        """Whether to disable the DB-level cache for this table."""
         self._storage = storage
         self._name = name
         self._cache: dict[IDVar, DocVar] = None  # type: ignore
@@ -282,9 +250,9 @@ class Table(Generic[IDVar, DocVar]):
 
         self.document_id_class.clear_cache(self)  # clear the ID cache
 
-        self._table_lock = asyncio.Lock()
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self.isolevel = 0
+        self._isolevel = 0
+        self._sink = AsinkRunner()
+        """Serialise all operations on this table."""
 
     def __repr__(self):
         args = [
@@ -309,13 +277,6 @@ class Table(Generic[IDVar, DocVar]):
         """
         return self._storage
 
-    @property
-    def loop(self) -> asyncio.AbstractEventLoop | None:
-        """
-        Get the event loop; returns `None` if no loop is set.
-        """
-        return self._loop
-
     async def insert(self, document: Mapping) -> IDVar:
         """
         Insert a new document into the table.
@@ -326,29 +287,34 @@ class Table(Generic[IDVar, DocVar]):
 
         # Make sure the document implements the ``Mapping`` interface
         if not isinstance(document, Mapping):
-            raise ValueError('Document is not a Mapping')
+            raise ValueError("Document is not a Mapping")
 
-        # First, we get the document ID for the new document
-        if isinstance(document, self.document_class):
-            # For a `Document` object we use the specified ID
-            doc_id = document.doc_id
+        doc_id: IDVar = None  # type: ignore
 
-            # We also reset the stored next ID so the next insert won't
-            # re-use document IDs by accident when storing an old value
-            await ensure_async(self.document_id_class.mark_existed)(self, doc_id)
-        else:
-            # In all other cases we use the next free ID
-            doc_id = await self._get_next_id()
-
-        # Now, we update the table and add the document
         def updater(table: dict[IDVar, DocVar]):
-            if doc_id in table:
-                raise ValueError(f'Document with ID {str(doc_id)} '
-                                 f'already exists')
+            # Now, we update the table and add the document
+            nonlocal doc_id
+            nonlocal document
 
-            # By calling ``dict(document)`` we convert the data we got to a
-            # ``dict`` instance even if it was a different class that
-            # implemented the ``Mapping`` interface
+            if isinstance(document, self.document_class):
+                # For a `Document` object we use the specified ID
+                doc_id = self.document_id_class(document.doc_id)
+
+                if doc_id in table:
+                    raise ValueError(f"Document with ID {str(doc_id)} "
+                                     "already exists")
+
+                # We also mark the ID as existing to prevent it from being
+                # generated again
+                self.document_id_class.mark_existed(self, doc_id)
+            else:
+                # For other objects we generate a new ID
+                doc_id = self._get_next_id(table.keys())
+
+            # If isolevel is higher than 2, deep copy the document
+            if self._isolevel >= 2:
+                document = deepcopy(document)
+
             table[doc_id] = self.document_class(document, doc_id)
 
         # See below for details on ``Table._update``
@@ -363,37 +329,41 @@ class Table(Generic[IDVar, DocVar]):
         :param documents: an Iterable of documents to insert
         :returns: a list containing the inserted documents' IDs
         """
+
         doc_ids = []
 
-        def updater(table: dict):
+        def updater(table: dict[IDVar, DocVar]):
             for document in documents:
 
                 # Make sure the document implements the ``Mapping`` interface
                 if not isinstance(document, Mapping):
-                    raise ValueError('Document is not a Mapping')
+                    raise ValueError("Document is not a Mapping")
+
+                if self._isolevel >= 2:
+                    document = deepcopy(document)
 
                 if isinstance(document, self.document_class):
                     # Check if document does not override an existing document
                     if document.doc_id in table:
                         raise ValueError(
-                            f'Document with ID {str(document.doc_id)} '
-                            f'already exists'
+                            f"Document with ID {str(document.doc_id)} "
+                            f"already exists"
                         )
 
                     # Store the doc_id, so we can return all document IDs
                     # later. Then save the document with its doc_id and
                     # skip the rest of the current loop
-                    doc_id = document.doc_id
+                    doc_id = self.document_id_class(document.doc_id)
                     doc_ids.append(doc_id)
-                    table[doc_id] = dict(document)
+                    table[doc_id] = self.document_class(document, doc_id)
                     continue
 
                 # Generate new document ID for this document
                 # Store the doc_id, so we can return all document IDs
                 # later, then save the document with the new doc_id
-                doc_id = sync_await(self._get_next_id(), self.loop)
+                doc_id = self._get_next_id(table.keys())
                 doc_ids.append(doc_id)
-                table[doc_id] = dict(document)
+                table[doc_id] = self.document_class(document, doc_id)
 
         # See below for details on ``Table._update``
         await self._update_table(updater)
@@ -414,7 +384,10 @@ class Table(Generic[IDVar, DocVar]):
 
         return [i async for i in self]
 
-    async def search(self, cond: QueryLike, limit: int = None) -> list[DocVar]:
+    async def search(
+            self,
+            cond: QueryLike,
+            limit: int = None) -> list[DocVar]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -426,17 +399,15 @@ class Table(Generic[IDVar, DocVar]):
         # query
         cached_results = self._query_cache.get(cond)
         if cached_results is not None:
+            if self._isolevel >= 2:
+                return cached_results
             return cached_results.copy()
 
         # Perform the search by applying the query to all documents.
         # Then, only if the document matches the query, convert it
         # to the document class and document ID class.
         table = await self._read_table()
-        if self.isolevel:
-            docs = self._search(cond, table, limit)
-        else:
-            async with self._table_lock:
-                docs = await arun_parallel(self._search, cond, table, limit)
+        docs = await self._run_with_iso(self._search, cond, table, limit)
 
         # Only cache cacheable queries.
         #
@@ -451,13 +422,13 @@ class Table(Generic[IDVar, DocVar]):
         # This is to keep consistency with TinyDB's behavior before
         # `is_cacheable` was introduced which assumed that all queries
         # are cacheable.
-        is_cacheable: Callable[[], bool] = getattr(cond, 'is_cacheable',
+        is_cacheable: Callable[[], bool] = getattr(cond, "is_cacheable",
                                                    lambda: True)
         if is_cacheable():
             # Update the query cache
-            self._query_cache[cond] = docs.copy()
+            self._query_cache[cond] = docs
 
-        return docs
+        return deepcopy(docs) if self._isolevel >= 2 else docs.copy()
 
     async def get(
         self,
@@ -475,6 +446,9 @@ class Table(Generic[IDVar, DocVar]):
         :returns: the document or ``None``
         """
 
+        if doc_id is not None and cond is not None:
+            raise ValueError('Only one of cond and doc_id can be specified')
+
         if doc_id is not None:
             # Retrieve a document specified by its ID
             table = await self._read_table()
@@ -484,6 +458,8 @@ class Table(Generic[IDVar, DocVar]):
                 return None
 
             # Make a copy of the document so we don't modify the original
+            if self._isolevel >= 2:
+                return deepcopy(doc)
             return self.document_class(doc, doc_id)
 
         if cond is not None:
@@ -493,11 +469,7 @@ class Table(Generic[IDVar, DocVar]):
             # to have the same type as `doc_id` which is this function's
             # parameter and is an optional `int`.
             table = await self._read_table()
-            if self.isolevel:
-                ret = self._search(cond, table, 1)
-            else:
-                async with self._table_lock:
-                    ret = await arun_parallel(self._search, cond, table, 1)
+            ret = await self._run_with_iso(self._search, cond, table, 1)
 
             return ret[0] if ret else None
 
@@ -545,12 +517,19 @@ class Table(Generic[IDVar, DocVar]):
 
         # Define the function that will perform the update
         if callable(fields):
-            def perform_update(table, doc_id):
+            def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
                 # Update documents by calling the update function provided by
                 # the user
+                if TYPE_CHECKING:
+                    assert callable(fields)  # skipcq: BAN-B101
                 fields(table[doc_id])
         else:
-            def perform_update(table, doc_id):
+            def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
+                nonlocal fields
+                if TYPE_CHECKING:
+                    assert isinstance(fields, dict)  # skipcq: BAN-B101
+                if self._isolevel >= 2:
+                    fields = deepcopy(fields)
                 # Update documents by setting all fields from the provided data
                 table[doc_id].update(fields)
 
@@ -560,7 +539,7 @@ class Table(Generic[IDVar, DocVar]):
 
             updated_ids = list(doc_ids)
 
-            def updater_by_ids(table: dict):
+            def updater_by_ids(table: dict[IDVar, DocVar]):
                 # Call the processing callback with all document IDs
                 for doc_id in updated_ids:
                     perform_update(table, doc_id)
@@ -576,7 +555,7 @@ class Table(Generic[IDVar, DocVar]):
             # Collect affected doc_ids
             updated_ids = []
 
-            def updater_by_cond(table: dict):
+            def updater_by_cond(table: dict[IDVar, DocVar]):
                 _cond = cast(QueryLike, cond)
 
                 # We need to convert the keys iterator to a list because
@@ -603,7 +582,7 @@ class Table(Generic[IDVar, DocVar]):
 
         updated_ids = []
 
-        def updater(table: dict):  # type: ignore
+        def updater(table: dict[IDVar, DocVar]):
             # Process all documents
             for doc_id in list(table.keys()):
                 # Add ID to list of updated documents
@@ -630,12 +609,15 @@ class Table(Generic[IDVar, DocVar]):
         """
 
         # Define the function that will perform the update
-        def perform_update(fields, table, doc_id):
+        def perform_update(fields: Callable[[Mapping], None] | Mapping,
+                           table: dict[IDVar, DocVar], doc_id: IDVar):
             if callable(fields):
                 # Update documents by calling the update function provided
                 # by the user
                 fields(table[doc_id])
             else:
+                if self._isolevel >= 2:
+                    fields = deepcopy(fields)
                 # Update documents by setting all fields from the provided
                 # data
                 table[doc_id].update(fields)
@@ -645,7 +627,7 @@ class Table(Generic[IDVar, DocVar]):
         # Collect affected doc_ids
         updated_ids = []
 
-        def updater(table: dict):
+        def updater(table: dict[IDVar, DocVar]):
             # We need to convert the keys iterator to a list because
             # we may remove entries from the ``table`` dict during
             # iteration and doing this without the list conversion would
@@ -732,7 +714,7 @@ class Table(Generic[IDVar, DocVar]):
             # to return the list of affected document IDs
             removed_ids = list(doc_ids)
 
-            def updater(table: dict):
+            def updater(table: dict[IDVar, DocVar]):
                 for doc_id in removed_ids:
                     table.pop(doc_id)
 
@@ -747,7 +729,7 @@ class Table(Generic[IDVar, DocVar]):
             # This updater function will be called with the table data
             # as its first argument. See ``Table._update`` for details on this
             # operation
-            def rm_updater(table: dict):
+            def rm_updater(table: dict[IDVar, DocVar]):
                 # We need to convince MyPy (the static type checker) that
                 # the ``cond is not None`` invariant still holds true when
                 # the updater function is called
@@ -793,6 +775,15 @@ class Table(Generic[IDVar, DocVar]):
 
         return len(await self.search(cond))
 
+    async def close(self) -> None:
+        """
+        Close the table.
+        """
+
+        self.clear_cache()
+        self.clear_data_cache()
+        await self._sink.aclose()
+
     def clear_cache(self) -> None:
         """
         Clear the query cache.
@@ -802,7 +793,7 @@ class Table(Generic[IDVar, DocVar]):
 
     def clear_data_cache(self):
         """
-        Clear the data cache.
+        Clear the DB-level cache.
         """
 
         self._cache = None
@@ -811,7 +802,7 @@ class Table(Generic[IDVar, DocVar]):
         """
         Count the total number of documents in this table.
         """
-        table = sync_await(self._read_table(), self.loop)
+        table = sync_await(self._read_table())
         return len(table)
 
     def __aiter__(self) -> AsyncGenerator[DocVar, None]:
@@ -825,19 +816,24 @@ class Table(Generic[IDVar, DocVar]):
         async def iterator():
             for doc_id, doc in (await self._read_table()).items():
                 # Convert documents to the document class
-                yield self.document_class(doc, doc_id)
+                if self._isolevel >= 2:
+                    yield deepcopy(doc)
+                else:
+                    yield self.document_class(doc, doc_id)
         return iterator()
 
-    async def _get_next_id(self):
+    def _get_next_id(self, keys: Collection[IDVar]) -> IDVar:
         """
         Return the ID for a newly inserted document.
         """
 
-        # Determine the next document ID by calling self.document_class.next_id()
-        # Make sure it doesn't block the event loop
-        next_id = await ensure_async(self.document_id_class.next_id)(self)
+        return self.document_id_class.next_id(self, keys)
 
-        return next_id
+    def __del__(self):
+        """
+        Clean up the table.
+        """
+        self._sink.close()
 
     def _search(self, cond: Callable[[Mapping], bool],
                 data: dict[IDVar, DocVar], limit: int = None) -> list[DocVar]:
@@ -847,7 +843,11 @@ class Table(Generic[IDVar, DocVar]):
             if cond(doc):
                 if limit is not None and count >= limit:
                     break
-                docs.append(self.document_class(doc, doc_id=doc_id))
+                if self._isolevel >= 2:
+                    doc = deepcopy(doc)
+                else:
+                    doc = self.document_class(doc, doc_id=doc_id)
+                docs.append(doc)
                 count += 1
         return docs
 
@@ -863,14 +863,24 @@ class Table(Generic[IDVar, DocVar]):
 
         # Read the table data from the underlying storage
         raw = await self._read_raw_table()
-        self._cache = {
-            self.document_id_class(doc_id):
-            self.document_class(doc, self.document_id_class(doc_id))
-            for doc_id, doc in raw.items()
-        }
+        cooked: dict[IDVar, DocVar] | None = None
+
+        def cook():
+            nonlocal cooked
+            doc_cls = self.document_class
+            id_cls = self.document_id_class
+            cooked = {
+                id_cls(doc_id): doc_cls(rdoc, doc_id=id_cls(doc_id))
+                for doc_id, rdoc in raw.items()
+            }
+        await self._run_with_iso(cook)
+        if self.no_dbcache:
+            # No caching
+            return cooked
+        self._cache = cooked
         return self._cache
 
-    async def _read_raw_table(self) -> Mapping[Any, Mapping]:
+    async def _read_raw_table(self) -> MutableMapping[Any, Mapping]:
         """
         Read the table data from the underlying storage.
 
@@ -878,9 +888,6 @@ class Table(Generic[IDVar, DocVar]):
         we may not want to convert *all* documents when returning
         only one document for example.
         """
-
-        # Set event loop
-        self._loop = asyncio.get_running_loop()
 
         # Retrieve the tables from the storage
         tables = await self._storage.read()
@@ -890,13 +897,7 @@ class Table(Generic[IDVar, DocVar]):
             return {}
 
         # Retrieve the current table's data
-        try:
-            table = tables[self.name]
-        except KeyError:
-            # The table does not exist yet, so it is empty
-            return {}
-
-        return table
+        return tables.pop(self.name, {})
 
     async def _update_table(self, updater: Callable[[dict[IDVar, DocVar]], None]):
         """
@@ -912,28 +913,27 @@ class Table(Generic[IDVar, DocVar]):
         document class, as the table data will *not* be returned to the user.
         """
 
-        tables: dict[Any, Mapping] = await self._storage.read() or {}
+        tables: MutableMapping[Any, Mapping] = await self._storage.read() or {}
 
         table = await self._read_table()
 
         # Perform the table update operation
-        loop = asyncio.get_event_loop()
-        async with self._table_lock:
-            if self.isolevel:  # Block event loop until update is finished
-                updater(table)
-            else:
-                await loop.run_in_executor(get_executor(), updater, table)
-            tables[self.name] = table
+        await self._run_with_iso(updater, table)
+        tables[self.name] = table
 
-            try:
-                # Write the newly updated data back to the storage
-                if self.isolevel:
-                    sync_await(self._storage.write(tables), self.loop)
-                else:
-                    await self._storage.write(tables)
-            except Exception as e:
-                self.clear_data_cache()
-                raise e
+        try:
+            # Write the newly updated data back to the storage
+            await self._storage.write(tables)
+        except Exception as e:
+            self.clear_data_cache()
+            raise e
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    async def _run_with_iso(self, func: Callable[ARGS, V],
+                            *args: ARGS.args, **kwargs: ARGS.kwargs) -> V:
+        """Run sync function with isolation level"""
+        if self._isolevel:
+            return await self._sink.run(func, *args, **kwargs)
+        return await async_run(func, *args, **kwargs)

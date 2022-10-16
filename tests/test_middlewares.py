@@ -11,7 +11,7 @@ doc = {'none': [None, None], 'int': 42, 'float': 3.1415899999999999,
        'dict': {'hp': 13, 'sp': 5},
        'bool': [True, False, True, False]}
 
-@pytest.mark.asyncio
+
 async def test_caching(storage):
     # Write contents
     await storage.write(doc)
@@ -19,12 +19,12 @@ async def test_caching(storage):
     # Verify contents
     assert doc == await storage.read()
 
-@pytest.mark.asyncio
+
 async def test_caching_read():
     db = TinyDB(storage=CachingMiddleware(MemoryStorage))
     assert (await db.all()) == []
 
-@pytest.mark.asyncio
+
 async def test_caching_write_many(storage):
     storage.WRITE_CACHE_SIZE = 3
 
@@ -41,7 +41,7 @@ async def test_caching_write_many(storage):
     # Verify contents: Cache should be emptied and written to storage
     assert storage.memory
 
-@pytest.mark.asyncio
+
 async def test_caching_flush(storage):
     # Write contents
     for _ in range(storage.WRITE_CACHE_SIZE - 1):
@@ -55,7 +55,7 @@ async def test_caching_flush(storage):
     # Verify contents: Cache should be emptied and written to storage
     assert storage.memory
 
-@pytest.mark.asyncio
+
 async def test_caching_flush_manually(storage):
     # Write contents
     await storage.write(doc)
@@ -65,7 +65,7 @@ async def test_caching_flush_manually(storage):
     # Verify contents: Cache should be emptied and written to storage
     assert storage.memory
 
-@pytest.mark.asyncio
+
 async def test_caching_write(storage):
     # Write contents
     await storage.write(doc)
@@ -75,7 +75,7 @@ async def test_caching_write(storage):
     # Verify contents: Cache should be emptied and written to storage
     assert storage.storage.memory
 
-@pytest.mark.asyncio
+
 async def test_nested():
     storage = CachingMiddleware(MemoryStorage)
     storage()  # Initialization
@@ -86,19 +86,41 @@ async def test_nested():
     # Verify contents
     assert doc == await storage.read()
 
-@pytest.mark.asyncio
+
 async def test_caching_json_write(tmpdir):
     path = str(tmpdir.join('test.db'))
 
-    async with TinyDB(path, storage=CachingMiddleware(JSONStorage)) as db:
-        await db.insert({'key': 'value'})
+    with pytest.raises(IOError):
+        async with TinyDB(path, storage=CachingMiddleware(JSONStorage)) as db:
+            await db.insert(doc)
+            await db.storage.flush()
+            await db.insert(doc)
+            await db.storage.storage.close()
+
+    statinfo = os.stat(path)
+    assert statinfo.st_size
+
+    db = TinyDB(path, access_mode="w+", storage=CachingMiddleware(JSONStorage))
+    await db.insert({'key': 'value'})
+    await db.close()
+
+    mw = db.storage
+    st = mw.storage
+    assert mw.on is st.on
+    assert mw.event_hook is st.event_hook
+
+    with pytest.raises(IOError):
+        await mw.write(doc)
+
+    with pytest.raises(IOError):
+        await mw.read()
 
     # Verify database filesize
     statinfo = os.stat(path)
-    assert statinfo.st_size != 0
+    assert statinfo.st_size
 
     # Assert JSON file has been closed
-    assert db._storage._handle.closed
+    assert db._storage.closed
 
     del db
 

@@ -36,16 +36,23 @@ def test_path_and():
     assert hash(query)
     assert hash(query) != hash(where('value'))
 
+    # Test unhashable
+    query._hash = None
+    query = query & (Query()['value'] == 5)
+    assert not query.is_cacheable()
+    query = query | (Query()['value'] == 5)
+    assert not query.is_cacheable()
+
 
 def test_callable_in_path_with_map():
-    double = lambda x: x + x
+    def double(x): return x + x
     query = Query().value.map(double) == 10
     assert query({'value': 5})
     assert not query({'value': 10})
 
 
 def test_callable_in_path_with_chain():
-    rekey = lambda x: {'y': x['a'], 'z': x['b']}
+    def rekey(x): return {'y': x['a'], 'z': x['b']}
     query = Query().map(rekey).z == 10
     assert query({'a': 5, 'b': 10})
 

@@ -83,17 +83,21 @@ class BaseActionChain(Sequence[ActionVar]):
         return reversed(self._seq)
 
     def __add__(self: ActionChainVar, other: ActionChainVar) -> ActionChainVar:
-        return type(self)(self._seq + other._seq)
+        if isinstance(other, BaseActionChain):
+            return type(self)(self._seq + other._seq)
+        return NotImplemented
 
     def __iadd__(self: ActionChainVar, other: ActionChainVar  # type: ignore[misc]
                  ) -> ActionChainVar:
-        if self.limit and len(self) + len(other) > self.limit:
-            raise RuntimeError(f"ActionChain limit reached: {self.limit}")
-        self._seq += other._seq
-        return self
+        if isinstance(other, BaseActionChain):
+            if self.limit and len(self) + len(other) > self.limit:
+                raise RuntimeError(f"ActionChain limit reached: {self.limit}")
+            self._seq += other._seq
+            return self
+        return NotImplemented
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, ActionChain):
+        if isinstance(other, BaseActionChain):
             return self._seq == other._seq
         return False
 
@@ -105,7 +109,7 @@ class BaseActionChain(Sequence[ActionVar]):
         return str(self._seq)
 
     def __repr__(self) -> str:
-        return '{'f"{type(self).__name__} : {self._seq}"'}'
+        return f"{type(self).__name__}({self._seq})"
 
     @overload
     def __getitem__(self: ActionChainVar, index: int) -> ActionVar:
@@ -224,6 +228,10 @@ class ActionCentipede(BaseActionChain[ActionVar]):
 
 
 class EventHook(dict[str, BaseActionChain]):
+    """
+    # Event Hook Class
+    Binds events to action chains.
+    """
     def __init__(self, chain: Mapping[str, Iterable[ActionVar]] | None = None):
         dict.__init__(self)
         if chain is not None:

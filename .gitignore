@@ -2,6 +2,7 @@
 .vscode
 .empty
 benchmark
+htmlcov
 
 # C extensions
 *.so

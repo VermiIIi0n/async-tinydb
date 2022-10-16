@@ -3,26 +3,20 @@ Utility functions.
 """
 
 from __future__ import annotations
-import inspect
-import asyncio
-import platform
-import multiprocessing as mp
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
-from contextvars import copy_context
-from functools import wraps, partial
 from collections import OrderedDict, abc
+from . import async_utils
+from .async_utils import *
 from typing import List, Iterator, TypeVar, Generic, Union, Optional, Type, \
-    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload, Awaitable, \
-    Generator, AsyncGenerator
-import nest_asyncio
+    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload
 
-K = TypeVar('K')
-V = TypeVar('V')
-D = TypeVar('D')
-T = TypeVar('T')
+K = TypeVar("K")
+V = TypeVar("V")
+D = TypeVar("D")
+T = TypeVar("T")
 S = TypeVar("S", bound="StrChain")
 
-__all__ = ('LRUCache', 'freeze', 'with_typehint', 'StrChain')
+__all__ = (("LRUCache", "freeze", "with_typehint", "StrChain",)
+           + async_utils.__all__)
 
 
 def with_typehint(baseclass: Type[T]):
@@ -45,103 +39,6 @@ def with_typehint(baseclass: Type[T]):
 
     # Otherwise: just inherit from `object` like a regular Python class
     return object
-
-
-def sync_await(coro: Awaitable[V], loop: asyncio.AbstractEventLoop = None) -> V:
-    loop = loop or get_create_loop()
-    nest_asyncio.apply(loop)
-    return loop.run_until_complete(coro)
-
-
-def ensure_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
-    if asyncio.iscoroutinefunction(func):
-        return func
-    return to_async(func)
-
-
-async def arun_parallel(func: Callable[..., V], *args, **kw) -> V:
-    """Run a sync function in another thread/process."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        get_executor(),
-        partial(func, *args, **kw))
-
-#### quart.utils ####
-
-
-def to_async(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
-    """Ensure that the sync function is run within the event loop.
-    If the *func* is not a coroutine it will be wrapped such that
-    it runs in the default executor (use loop.set_default_executor
-    to change). This ensures that synchronous functions do not
-    block the event loop.
-    """
-
-    @wraps(func)
-    async def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, copy_context().run, partial(func, *args, **kwargs)
-        )
-        if inspect.isgenerator(result):
-            return to_async_iter(result)
-        return result
-
-    return _wrapper
-
-
-def to_async_iter(iterable: Generator[Any, None, None]) -> AsyncGenerator[Any, None]:
-    async def _gen_wrapper() -> AsyncGenerator[Any, None]:
-        # Wrap the generator such that each iteration runs
-        # in the executor. Then rationalise the raised
-        # errors so that it ends.
-        def _inner() -> Any:
-            # https://bugs.python.org/issue26221
-            # StopIteration errors are swallowed by the
-            # run_in_exector method
-            try:
-                return next(iterable)
-            except StopIteration as e:
-                raise StopAsyncIteration() from e
-
-        loop = asyncio.get_running_loop()
-        while True:
-            try:
-                yield await loop.run_in_executor(None, copy_context().run, _inner)
-            except StopAsyncIteration:
-                return
-
-    return _gen_wrapper()
-
-
-def get_create_loop():
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
-
-
-_EXECUTOR: Executor | None = None
-
-
-def get_executor() -> Executor:
-    """
-    Get the default executor for the current platform.
-    """
-    global _EXECUTOR
-    if _EXECUTOR:
-        return _EXECUTOR
-    if platform.system() == "Linux":
-        try:
-            mp.set_start_method("fork", force=True)
-        except RuntimeError:
-            ...
-        if mp.get_start_method() == "fork":
-            _EXECUTOR = ProcessPoolExecutor()
-    _EXECUTOR = ThreadPoolExecutor()
-    return _EXECUTOR
 
 
 class LRUCache(abc.MutableMapping, Generic[K, V]):
@@ -268,28 +165,34 @@ def freeze(obj):
 
 class StrChain(Sequence[str]):
     """
-    ### StrChain: More than a convenient way to create strings.
-    It is NOT a subclass of `str`, use `str()` to convert it to str.
+    # StrChain Class
+    ## More than a convenient way to create strings.
+    **It is NOT a subclass of `str`, use `str()` to convert it to str.**
 
     By default `callback` is `str`, so simply calling the instance will 
     return the string.
 
     StrChain is immutable. Hash is the same as the string it represents.
 
-    Usage:
+    ### Usage:
     ```Python
     str_chain = StrChain()
-    str_chain.hello.world() is "hello.world"
-    # String can't start with '_' when using __getattr__ , 
-    # use __getitem__ instead
+    str_chain.hello.world() == "hello.world"
+    ```
+
+    **String can't start with '_' when using __getattr__ , 
+    use __getitem__ instead**
+    ```Python
     str_chain.["hello"]["_world"]() is "hello._world"
 
     path = StrChain(['/'], joint="/") # Init with a list and set a custom joint
     path.home.user() is "/home/user"
     str(path + "home" + "user") == "/home/user" # Comparing with str
-
-    # callback: used when calling StrChain, default is `str`
-    # First argument is the StrChain itself followed by args and kwargs
+    ```
+    ### callback
+    Used when calling StrChain, default is `str`
+    First argument is the StrChain itself followed by args and kwargs
+    ```Python
     string = StrChain(callback=lambda x: '!'.join([i.lower() for i in x]))
     string.Hello.World() == "hello!world"
     ```
@@ -298,7 +201,7 @@ class StrChain(Sequence[str]):
 
     def __init__(
             self: S,
-            it: Iterable[str] | None = None,
+            it: str | Iterable[str] | None = None,
             joint: str = '.',
             callback: Callable[..., Any] = str,
             **kw):
@@ -352,7 +255,7 @@ class StrChain(Sequence[str]):
         raise TypeError(f"Invalid type {type(value)}")
 
     def __eq__(self, other) -> bool:
-        if type(other) is type(self):
+        if isinstance(other, StrChain):
             return self._list == other._list \
                 and self._joint == other._joint \
                 and self._callback == other._callback \
@@ -361,6 +264,9 @@ class StrChain(Sequence[str]):
 
     def __hash__(self: S) -> int:
         return hash(str(self))
+
+    def __bool__(self: S) -> bool:
+        return bool(self._list)
 
     def __add__(self: S, other: Iterable[str] | str) -> S:
         other = [other] if isinstance(other, str) else list(other)
@@ -374,10 +280,12 @@ class StrChain(Sequence[str]):
         return self + other
 
     def __mul__(self: S, other: int) -> S:
+        if not isinstance(other, int):
+            return NotImplemented
         return self.__create(self._list * other)
 
     def __rmul__(self: S, other: int) -> S:
-        return self.__create(self._list * other)
+        return self * other
 
     def __imul__(self: S, other: int) -> S:
         return self * other
@@ -385,8 +293,16 @@ class StrChain(Sequence[str]):
     def __iter__(self: S) -> Iterator[str]:
         return iter(self._list)
 
+    def __reversed__(self: S) -> Iterator[str]:
+        return reversed(self._list)
+
+    def __contains__(self: S, item: object) -> bool:
+        return item in self._list
+
     def __str__(self: S) -> str:
         return self._joint.join(self._list)
 
     def __repr__(self: S) -> str:
-        return self._joint.join(self._list)
+        return (f"{type(self).__name__}({self._list!r}, "
+                f"joint={self._joint!r}, "
+                f"callback={self._callback!r}, **{self._kw!r})")

@@ -110,6 +110,9 @@ class CachingMiddleware(Middleware):
         self.cache_size = value
 
     async def read(self):
+        if self.storage.closed:
+            raise IOError('Storage is closed')
+
         if self.cache is None:
             # Empty cache: read from the storage
             self.cache = await self.storage.read()
@@ -132,12 +135,15 @@ class CachingMiddleware(Middleware):
         """
         Flush all unwritten data to disk.
         """
-        if self._cache_modified_count > 0:
+        if self._cache_modified_count:
             # Force-flush the cache by writing the data to the storage
             await self.storage.write(self.cache)
             self._cache_modified_count = 0
 
     async def close(self):
+        if self.storage.closed and self._cache_modified_count:
+            raise IOError("Storage is closed before flushing the cache")
+
         # Flush potentially unwritten data
         await self.flush()
 

@@ -1,14 +1,18 @@
 """Modifier class for TinyDB."""
 
-from typing import Any, Callable
+from __future__ import annotations
+from typing import Any, Callable, TypeVar
 from warnings import warn
 from functools import partial
 from .storages import Storage
-from .utils import arun_parallel
+from .utils import async_run
 from .database import TinyDB
 
 
-def _get_storage(item: Storage | TinyDB) -> Storage:
+_S = TypeVar('_S', bound=Storage)
+
+
+def _get_storage(item: _S | TinyDB[_S]) -> _S:
     """Get the storage from a TinyDB or Storage object."""
     if isinstance(item, TinyDB):
         return item.storage
@@ -23,8 +27,7 @@ class Modifier:
         """
 
         @staticmethod
-        def AES_GCM(s: Storage | TinyDB, key: str | bytes,
-                    encoding="utf-8", **kw) -> Storage:
+        def AES_GCM(s: _S | TinyDB[_S], key: str | bytes, **kw) -> _S:
             """
             ### Add AES-GCM Encryption to TinyDB Storage
             Hooks to `write.post` and `read.pre` to encrypt/decrypt data.
@@ -55,9 +58,9 @@ class Modifier:
                 nonlocal dtype
                 cipher: GcmMode = AES.new(key, **kw)  # type: ignore
                 if isinstance(data, str):
-                    dtype = type(data)
-                    data = data.encode(encoding)
-                task = arun_parallel(cipher.encrypt_and_digest, data)
+                    dtype = str
+                    data = data.encode("utf-8")
+                task = async_run(cipher.encrypt_and_digest, data)
                 data, digest = await task
                 data = len(digest).to_bytes(1, "little") + \
                     digest + cipher.nonce + data
@@ -71,18 +74,18 @@ class Modifier:
                 cipher: GcmMode = AES.new(
                     key, nonce=data[d_len + 1:d_len + 17], **kw)  # type: ignore
                 data = data[d_len + 17:]
-                task = arun_parallel(cipher.decrypt_and_verify, data, digest)
+                task = async_run(cipher.decrypt_and_verify, data, digest)
                 ret = await task
 
                 if dtype is bytes:
                     return ret
-                return dtype(ret, encoding=encoding)
+                return dtype(ret, encoding="utf-8")
 
             return s
 
     @classmethod
-    def add_encryption(cls, s: Storage | TinyDB, key: str | bytes,
-                       encoding="utf-8", **kw) -> Storage:
+    def add_encryption(cls, s: _S | TinyDB[_S], key: str | bytes,
+                       encoding=None, **kw) -> _S:
         """
         ### Add AES-GCM Encryption to TinyDB Storage
         **Deprecated, consider using Modifier.Encryption.AES_GCM**
@@ -92,13 +95,16 @@ class Modifier:
 
         * `s` - `Storage` or `TinyDB` to modify
         * `key` - Encryption key (must be 16, 24, or 32 bytes long)
-        * `encoding` - Encoding to use for string data
+        * `encoding` - Deprecated
         """
 
         warn("Modifier.add_encryption is deprecated, "
              "use Modifier.Encryption.AES_GCM instead",
              DeprecationWarning, stacklevel=2)
-        return cls.Encryption.AES_GCM(s, key, encoding, **kw)
+        if encoding:
+            warn("Modifier.add_encryption: `encoding` is deprecated",
+                 DeprecationWarning, stacklevel=2)
+        return cls.Encryption.AES_GCM(s, key, **kw)
 
     class Compression:
         """
@@ -107,7 +113,7 @@ class Modifier:
         """
 
         @staticmethod
-        def brotli(s: Storage | TinyDB, quality=11, **kw) -> Storage:
+        def brotli(s: _S | TinyDB[_S], quality=11, **kw) -> _S:
             """
             ### Add Brotli Compression to TinyDB Storage
             Hooks to `write.post` and `read.pre` to compress/decompress data.
@@ -127,23 +133,27 @@ class Modifier:
 
             s = _get_storage(s)
             kw["quality"] = quality
+            dtype: type = bytes
 
             @s.on.write.post
             async def compress_brotli(ev: str, s: Storage, data: str | bytes):
+                nonlocal dtype
                 if isinstance(data, str):
+                    dtype = str
                     data = data.encode("utf-8")
-                ret: bytes = await arun_parallel(brotli.compress, data, **kw)
-                return ret
+                return await async_run(brotli.compress, data, **kw)
 
             @s.on.read.pre
             async def decompress_brotli(ev: str, s: Storage, data: bytes):
-                task = arun_parallel(brotli.decompress, data)
-                return await task
+                task = async_run(brotli.decompress, data)
+                if dtype is bytes:
+                    return await task
+                return dtype(await task, encoding="utf-8")
 
             return s
 
         @staticmethod
-        def blosc2(s: Storage | TinyDB, clevel=9, **kw) -> Storage:
+        def blosc2(s: _S | TinyDB[_S], clevel=9, **kw) -> _S:
             """
             ### Add Blosc2 Compression to TinyDB Storage
             Hooks to `write.post` and `read.pre` to compress/decompress data.
@@ -162,19 +172,22 @@ class Modifier:
 
             s = _get_storage(s)
             kw["clevel"] = clevel
+            dtype: type = bytes
 
             @s.on.write.post
             async def compress_blosc2(ev: str, s: Storage, data: str | bytes):
+                nonlocal dtype
                 if isinstance(data, str):
+                    dtype = str
                     data = data.encode("utf-8")
-                task = arun_parallel(partial(blosc2.compress, data, **kw))
-                ret: str | bytes = await task
-                return ret
+                return await async_run(blosc2.compress, data, **kw)
 
             @s.on.read.pre
             async def decompress_blosc2(ev: str, s: Storage, data: bytes):
-                task = arun_parallel(blosc2.decompress, data)
-                return await task
+                task = async_run(blosc2.decompress, data)
+                if dtype is bytes:
+                    return await task
+                return dtype(await task, encoding="utf-8")
 
             return s
 
@@ -185,13 +198,13 @@ class Modifier:
         """
 
         @staticmethod
-        def ExtendedJSON(s: Storage,
+        def ExtendedJSON(s: _S | TinyDB[_S],
                          type_hooks: dict[type, None | Callable[[
                              Any, Callable[[Any], Any]],
                              dict[str, Any]]] = None,
                          marker_hooks: dict[str, None | Callable[[
                              dict[str, Any], Callable[[Any], Any]],
-                             Any]] = None):
+                             Any]] = None) -> _S:
             """
             ### Extend JSON Data Types
 
@@ -290,7 +303,7 @@ class Modifier:
                 memo = memo.copy() if memo else set()  # Anti-recursion
                 _id = id(obj)
                 if _id in memo:
-                    raise RecursionError("Loop reference detected")
+                    raise ValueError("Circular reference detected")
                 memo.add(_id)
                 _convert = partial(convert, memo=memo)
 
@@ -331,8 +344,10 @@ class Modifier:
 
             @s.on.write.pre
             async def convert_exjson(ev: str, s: Storage, data: dict):
-                return await arun_parallel(convert, data)
+                return await async_run(convert, data)
 
             @s.on.read.post
             async def recover_exjson(ev: str, s: Storage, data: dict):
-                return await arun_parallel(recover, data)
+                return await async_run(recover, data)
+
+            return s

@@ -2,7 +2,7 @@
 
 ## What's This?
 
-An asynchronous version of `TinyDB` based on `aiofiles`.
+An asynchronous version of `TinyDB`.
 
 Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.  
 
@@ -12,42 +12,38 @@ I will try to keep up with the latest version of `TinyDB`.
 
 ## Incompatible Changes
 
-Major Changes:
-
 * **Asynchronous**: Say goodbye to blocking IO. **Don't forget to `await` async methods**!
-* **Drop support**: Only supports Python 3.8+.
 
-Minor Changes:
+* **Drop support**: Only supports Python 3.10+.  (for 3.8+ go to this [branch](https://github.com/VermiIIi0n/async-tinydb/tree/legacy))
 
-* **Lazy-load:** When `access_mode` is set to `'r'`, `FileNotExistsError` is not raised until the first read operation.
-
-* **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`
-  Why not `orjson`? Because `ujson` is fast enough and has more features.
+* **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`[^1]
 
 * **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError` should be raised.
 
-* **`CachingMiddleWare`**: `WRITE_CACHE_SIZE` is now instance-specific.  
-  Example: `TinyDB("test.db", storage=CachingMiddleWare(JSONStorage, 1024))`
+* **[Miscellaneous](#misc)**: Differences only matter in edge cases.
 
 ## New Features
 
 * **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
 
-* **Redesigned ID & Doc class**: You can [customise them](#customise-id-class) more pleasingly.  
-  The default ID class is `IncreID`, which mimics the behaviours of the original `int` ID but requires much fewer IO operations.  
-  The default Doc class remains almost the same.
+* **Redesigned ID & Doc class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
+  
+* **DB-level caching**: This significantly improves the performance of all operations. However, the responsibility of converting the data to the correct type is transferred to the Storage[^2][^disable-db-level]. 
 
-* **DB level caching**: This significantly improves the performance of all operations. But it requires more memory, and the responsibility of converting the data to the correct type is transmitted to the Storage. e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+* **Built-in `Modifier`**: Use `Modifier` to easily [encrypt](#encryption), [compress](./docs/Modifier.md#Compression) and [extend types](./docs/Modifier.md#Conversion) of your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
 
-* **Built-in `Modifier`**: Use `Modifier` to easily [encrypt](#encryption) and [compress](#compression) your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
+* **Isolation Level**: Performance or ACID? It's up to you[^isolevel].
+
+* **Atomic Write**: **A**CID!
 
 ## How to use it?
 
 #### Installation
 
-```Bash
-pip install async-tinydb
-```
+* Minimum: `pip install async-tinydb`
+* Encryption: `pip install async-tinydb[encryption]`
+* Compression: `pip install async-tinydb[compression]`
+* Full: `pip install async-tinydb[all]`
 
 #### Importing
 
@@ -72,15 +68,25 @@ That's it.
 
 #### Replacing ID & Document Class
 
-**Mixing classes in one table may cause errors!**
+**NOTICE: Mixing classes in one table may cause errors!**
+
+When a table exists in a file, `Async-TinyDB` won't determine classes by itself, it is your duty to make sure classes are matching.
+
+##### ID Classes
+
+* `IncreID`: Default ID class, mimics the behaviours of the original `int` ID but requires much fewer IO operations.
+* `UUID`: Uses `uuid.UUID`[^uuid-version].
+
+##### Document Class
+
+* `Document`: Default document class, uses `dict`under the bonet.
 
 ```Python
 from asynctinydb import TinyDB, UUID, IncreID, Document
 
 db = TinyDB("database.db")
 
-# Replacing ID class to UUID
-# By default, ID class is IncreID, document_class is Document
+# Setting ID class to UUID, document class to Document
 tab = db.table("table1", document_id_class=UUID, document_class=Document)
 ```
 
@@ -104,49 +110,44 @@ async def main():
 
 ##### 2. Use  `Modifier` class
 
-The modifier class contains some methods to modify the behaviour of `TinyDB` and `Storage` classes.
-
-It relies on `event hooks`.
-
-`Encryption` is a subclass of the `Modifier` class. It contains methods to add encryption to the storage that fulfils the following conditions:
-
-1. The storage has `write.post` and `read.pre` events.
-2. The storage stores data in `bytes`.
-3. The argument passed to the methods is `str` or `bytes`. See the implementation of `JSONStorage` for more details.
-
-```Python
-from asynctinydb import TinyDB, Modifier
-
-async def main():
-    db = TinyDB("db.json", access_mode="rb+")  # Binary mode is required
-    Modifier.Encryption.AES_GCM(db, "your key goes here")
-    # Or, you can pass a Storage instance
-    # Modifier.Encryption.AES_GCM(db.storage, "your key goes here")
-
-```
+_See [Encryption](./docs/Modifier.md#Encryption)_
 
 #### Isolation Level
 
-To avoid blocking codes, Async-TinyDB puts CPU-bound tasks to another thread/process (On Linux, if forking a process is possible, `ProcessPoolExecutor` will be used instead of the `ThreadPoolExecutor`).
+To avoid blocking codes, Async-TinyDB puts CPU-bound tasks into another thread (Useful with interpreters without GIL)
 
 Unfortunately, this introduces chances of data being modified when:
 
 * Manipulating mutable objects within `Document` instances in another coroutine
 * Performing updating/saving/searching operations (These operations are run in a different thread/process)
 * The conditions above are satisfied in the same `Table`
-* The conditions above are satisfied simultaneously
+* The conditions above are satisfied simultaneously.
 
-You can either avoid these operations or set a higher isolation level to mitigate this problem.
+Avoid these operations or set a higher isolation level to mitigate this problem.
 
 ```Python
-db.isolevel = 1  # By default isolevel is 0
+db.isolevel = 2
 ```
 
 `isolevel`:
 
 0. No isolation
-1. Don't run operations in another thread/process, or run in a blocking way.
-2. Disable
+1. Serialised CRUD operations (Also ensures thread safety) (default)
+2. Deepcopy documents on CRUD (Ensures `Index` consistency)
+
+
+
+#### DB-level caching
+
+DB-level caching improves performance dramatically.
+
+However, this may cause data inconsistency between `Storage` and `TinyDB` if the file that `Storage` referred to is been shared.
+
+To disable it:
+
+```Python
+db = TinyDB("./path", no_dbcache=True)
+```
 
 ## Example Codes:
 
@@ -210,16 +211,15 @@ class MyID(BaseID):
         ...
 
     @classmethod
-    def next_id(cls, table: Table) -> IncreID:
+    def next_id(cls, table: Table, keys) -> MyID:
         """
-        Recommended to define it as an async function, but a sync def will do.
         It should return a unique ID.
         """
 
     @classmethod
-    def mark_existed(cls, table: Table, new_id: IncreID):
+    def mark_existed(cls, table: Table, new_id):
         """
-        Marks an ID as existing; the same ID shouldn't be generated by next_id again.
+        Marks an ID as existing; the same ID shouldn't be generated by next_id.
         """
 
     @classmethod
@@ -255,3 +255,17 @@ class BaseDocument(Mapping[IDVar, Any]):
 ```
 
 Make sure you have implemented all the methods required by  `BaseDocument` class.
+
+## Misc
+
+* **Lazy-load:** File loading & dirs creating are delayed to the first IO operation.
+* **`CachingMiddleWare`**: `WRITE_CACHE_SIZE` is now instance-specific.  
+  Example: `TinyDB("test.db", storage=CachingMiddleWare(JSONStorage, 1024))`
+
+
+
+[^1]: Why not `orjson`? Because `ujson` is fast enough and has more features.
+[^2]: e.g. `JSONStorage` needs to convert the keys to `str` by itself.
+[^UUID-version]:Currently using UUID4
+[^disable-db-level]: See [DB-level caching](#db-level-caching) to learn how to disable this feature if it causes dirty reads.
+[^isolevel]: See [isolevel](#isolation-level)
