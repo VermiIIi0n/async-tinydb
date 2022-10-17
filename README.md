@@ -1,6 +1,6 @@
 <img src="./artwork/logo.png" alt="logo" style="zoom:50%;" />
 
-## What's This?
+# What's This?
 
 An asynchronous version of `TinyDB`.
 
@@ -10,7 +10,7 @@ I will try to keep up with the latest version of `TinyDB`.
 
 
 
-## Incompatible Changes
+# Incompatible Changes
 
 * **Asynchronous**: Say goodbye to blocking IO. **Don't forget to `await` async methods**!
 
@@ -22,7 +22,7 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **[Miscellaneous](#misc)**: Differences only matter in edge cases.
 
-## New Features
+# New Features
 
 * **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
 
@@ -36,22 +36,22 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **Atomic Write**: **A**CID!
 
-## How to use it?
+# How to use it?
 
-#### Installation
+## Installation
 
 * Minimum: `pip install async-tinydb`
 * Encryption: `pip install async-tinydb[encryption]`
 * Compression: `pip install async-tinydb[compression]`
 * Full: `pip install async-tinydb[all]`
 
-#### Importing
+## Importing
 
 ```Python
 from asynctinydb import TinyDB, where
 ```
 
-#### Using
+## Using
 
 See the [original `TinyDB` documents](https://tinydb.readthedocs.org). Insert an `await` in front of async methods. 
 
@@ -61,23 +61,23 @@ That's it.
 
 ******
 
-#### Documents For Advances Usage
+## Documents For Advances Usage
 
 * [Modifier](./docs/Modifier.md)
 * [Event Hooks](./docs/EventHooks.md)
 
-#### Replacing ID & Document Class
+## Replacing ID & Document Class
 
 **NOTICE: Mixing classes in one table may cause errors!**
 
 When a table exists in a file, `Async-TinyDB` won't determine classes by itself, it is your duty to make sure classes are matching.
 
-##### ID Classes
+### ID Classes
 
 * `IncreID`: Default ID class, mimics the behaviours of the original `int` ID but requires much fewer IO operations.
 * `UUID`: Uses `uuid.UUID`[^uuid-version].
 
-##### Document Class
+### Document Class
 
 * `Document`: Default document class, uses `dict`under the bonet.
 
@@ -92,13 +92,13 @@ tab = db.table("table1", document_id_class=UUID, document_class=Document)
 
 _See [Customisation](#customise-id-class) for more details_
 
-#### Encryption
+## Encryption
 
 Currently only supports AES-GCM encryption.
 
 There are two ways to use encryption:
 
-##### 1. Use `EncryptedJSONStorage` directly
+### 1. Use `EncryptedJSONStorage` directly
 
 ```Python
 from asynctinydb import EncryptedJSONStorage, TinyDB
@@ -108,11 +108,11 @@ async def main():
 
 ```
 
-##### 2. Use  `Modifier` class
+### 2. Use  `Modifier` class
 
 _See [Encryption](./docs/Modifier.md#Encryption)_
 
-#### Isolation Level
+## Isolation Level
 
 To avoid blocking codes, Async-TinyDB puts CPU-bound tasks into another thread (Useful with interpreters without GIL)
 
@@ -133,11 +133,11 @@ db.isolevel = 2
 
 0. No isolation
 1. Serialised CRUD operations (Also ensures thread safety) (default)
-2. Deepcopy documents on CRUD (Ensures `Index` consistency)
+2. Deepcopy documents on CRUD (Ensures `Index` & `Query Cache` consistency)
 
 
 
-#### DB-level caching
+## DB-level caching
 
 DB-level caching improves performance dramatically.
 
@@ -149,9 +149,9 @@ To disable it:
 db = TinyDB("./path", no_dbcache=True)
 ```
 
-## Example Codes:
+# Example Codes:
 
-### Simple One
+## Simple One
 
 ```Python
 import asyncio
@@ -164,7 +164,7 @@ async def main():
 
 asyncio.run(main())
 ```
-### Event Hooks Example
+## Event Hooks Example
 
 ```Python
 async def main():
@@ -185,7 +185,7 @@ async def main():
     print(await db.search(Query().answer == 42))  # >>> [{'answer': 42}] 
 ```
 
-### Customise ID Class
+## Customise ID Class
 
 Inherit from `BaseID` and implement the following methods, and then you are good to go.
 
@@ -229,7 +229,7 @@ class MyID(BaseID):
         """
 ```
 
-### Customise Document Class
+## Customise Document Class
 
 ```Python
 from asynctinydb import BaseDocument
@@ -256,7 +256,7 @@ class BaseDocument(Mapping[IDVar, Any]):
 
 Make sure you have implemented all the methods required by  `BaseDocument` class.
 
-## Misc
+# Misc
 
 * **Lazy-load:** File loading & dirs creating are delayed to the first IO operation.
 * **`CachingMiddleWare`**: `WRITE_CACHE_SIZE` is now instance-specific.  

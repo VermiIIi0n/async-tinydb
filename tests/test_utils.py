@@ -8,7 +8,7 @@ import time
 from threading import Thread, get_ident
 from concurrent.futures._base import CancelledError as SyncCancelledError
 from asynctinydb.utils import LRUCache, freeze, FrozenDict, to_async_gen
-from asynctinydb.utils import StrChain, ensure_async, sync_await
+from asynctinydb.utils import StrChain, ensure_async, sync_await, mimics
 from asynctinydb.utils import get_create_loop, AsinkRunner, TerminateRunner
 
 
@@ -97,6 +97,37 @@ def test_lru_cache_iteration_works():
     assert count == 0
 
 
+def test_mimics():
+
+    @mimics(dict.__init__)
+    def init(*args, **kw):
+        dict(*args, **kw)
+
+    # init(123)
+    
+    assert init.__name__ == 'init'
+
+
+def test_frozendict():
+    d = {'a': 1, 'b': 2}
+    fd = FrozenDict(d)
+    assert str(fd) == f"<FrozenDict {d}>"
+    assert fd['a'] == 1
+    assert fd.get('a') == 1
+    assert fd.get('n', 123) == 123
+    assert fd.get('n') is None
+    assert tuple(fd.keys()) == tuple(d.keys())
+    assert tuple(fd.values()) == tuple(d.values())
+    assert tuple(fd.items()) == tuple(d.items())
+    assert fd == d
+    assert hash(fd)
+    assert hash(fd) == hash(fd)
+    assert 'a' in fd
+    assert 'n' not in fd
+    assert all(k in d for k in fd)
+    assert len(fd) == 2
+
+
 def test_freeze():
     frozen = freeze([0, 1, 2, {'a': [1, 2, 3]}, {1, 2}])
     assert isinstance(frozen, tuple)
@@ -104,16 +135,21 @@ def test_freeze():
     assert isinstance(frozen[3]['a'], tuple)
     assert isinstance(frozen[4], frozenset)
 
+    d = {}
+    d['d'] = d
+    with pytest.raises(ValueError, match="recursive"):
+        freeze(d)
+
     with pytest.raises(TypeError):
         frozen[0] = 10
 
     with pytest.raises(TypeError):
         frozen[3]['a'] = 10
 
-    with pytest.raises(TypeError):
+    with pytest.raises(AttributeError):
         frozen[3].pop('a')
 
-    with pytest.raises(TypeError):
+    with pytest.raises(AttributeError):
         frozen[3].update({'a': 9})
 
 
@@ -248,8 +284,8 @@ def test_sync_await_threadsafe_on_closed_loop():
     t.start()
 
 
-def test_sync_await_threadsafe_misbound_future():
-    loop = asyncio.new_event_loop()
+async def test_sync_await_threadsafe_misbound_future():
+    loop = asyncio.get_running_loop()
     future = asyncio.Future(loop=asyncio.new_event_loop())
 
     def run():

@@ -26,7 +26,7 @@ async def f(ev, s, data):  # Will be executed on event `write.pre`
   ...
 ```
 
-### Event Hooks Example
+## Event Hooks Example
 
 ```Python
 async def main():

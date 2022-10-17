@@ -355,6 +355,10 @@ async def test_search(db: TinyDB):
     assert len(await db.search(BlindQuery())) == 3
 
 
+async def test_search_with_doc_ids(db: TinyDB):
+    ...
+
+
 async def test_search_path(db: TinyDB):
     assert not db._query_cache
     assert len(await db.search(where('int').exists())) == 3
@@ -373,8 +377,6 @@ async def test_get(db: TinyDB):
     item = await db.get(where('char') == 'b')
     assert item is not None
     assert item['char'] == 'b'
-    with pytest.raises(ValueError):
-        await db.get(where('char') == 'x', doc_id=1)
 
 
 async def test_get_ids(db: TinyDB):

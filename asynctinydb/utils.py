@@ -3,20 +3,33 @@ Utility functions.
 """
 
 from __future__ import annotations
-from collections import OrderedDict, abc
+from collections import OrderedDict
 from . import async_utils
 from .async_utils import *
-from typing import List, Iterator, TypeVar, Generic, Union, Optional, Type, \
-    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload
+from typing import Iterator, Mapping, MutableSequence, \
+    MutableSet, TypeVar, Generic, Type, \
+    TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload, MutableMapping
 
 K = TypeVar("K")
 V = TypeVar("V")
 D = TypeVar("D")
 T = TypeVar("T")
 S = TypeVar("S", bound="StrChain")
+C = TypeVar("C", bound=Callable)
 
-__all__ = (("LRUCache", "freeze", "with_typehint", "StrChain",)
+__all__ = (("LRUCache", "freeze", "with_typehint", "StrChain", "FrozenDict", "mimics")
            + async_utils.__all__)
+
+
+def mimics(_: C) -> Callable[[Callable], C]:
+    """
+    Type trick. This decorator is used to make a function mimic the signature
+    of another function.
+    """
+    def decorator(wrapper: Callable) -> C:
+        return wrapper  # type: ignore
+
+    return decorator
 
 
 def with_typehint(baseclass: Type[T]):
@@ -41,7 +54,7 @@ def with_typehint(baseclass: Type[T]):
     return object
 
 
-class LRUCache(abc.MutableMapping, Generic[K, V]):
+class LRUCache(MutableMapping, Generic[K, V]):
     """
     A least-recently used (LRU) cache with a fixed cache size.
 
@@ -60,7 +73,7 @@ class LRUCache(abc.MutableMapping, Generic[K, V]):
         self.cache: OrderedDict[K, V] = OrderedDict()
 
     @property
-    def lru(self) -> List[K]:
+    def lru(self) -> list[K]:
         return list(self.cache.keys())
 
     @property
@@ -92,7 +105,7 @@ class LRUCache(abc.MutableMapping, Generic[K, V]):
     def __iter__(self) -> Iterator[K]:
         return iter(self.cache)
 
-    def get(self, key: K, default: D = None) -> Optional[Union[V, D]]:
+    def get(self, key: K, default: D = None) -> V | D | None:
         value = self.cache.get(key)
 
         if value is not None:
@@ -116,7 +129,7 @@ class LRUCache(abc.MutableMapping, Generic[K, V]):
                 self.cache.popitem(last=False)
 
 
-class FrozenDict(dict):
+class FrozenDict(Mapping[K, V]):
     """
     An immutable dictionary.
 
@@ -125,41 +138,82 @@ class FrozenDict(dict):
     class removes the mutability and implements the ``__hash__`` method.
     """
 
+    @overload
+    def __init__(self): ...
+    @overload
+    def __init__(self: FrozenDict[str, V], **kw: V): ...
+    @overload
+    def __init__(self, _map: Mapping[K, V]): ...
+    @overload
+    def __init__(self: FrozenDict[str, V], _map: Mapping[str, V], **kw: V): ...
+    @overload
+    def __init__(self, _iter: Iterable[tuple[K, V]]): ...
+    @overload
+    def __init__(self: FrozenDict[str, V], _: Iterable[tuple[str, V]], **kw: V): ...
+    @overload
+    def __init__(self: FrozenDict[str, str], _iter: Iterable[list[str]]): ...
+
+    def __init__(self, *args, **kw):
+        super().__init__()
+        self._dict = dict[K, V](*args, **kw)
+        self._hash = None
+
+    def __repr__(self):
+        return f"<FrozenDict {self._dict}>"
+
     def __hash__(self):
-        # Calculate the has by hashing a tuple of all dict items
-        return hash(tuple(sorted(self.items())))
+        if self._hash is None:
+            # Calculate the hash by hashing a tuple of sorted hashes of dict k/v pairs
+            self._hash = hash(tuple(sorted(hash((k, v)) for k, v in self.items())))
+        return self._hash
 
-    @staticmethod
-    def _immutable(*args, **kws):
-        raise TypeError('object is immutable')
+    def __getitem__(self, key):
+        return self._dict[key]
 
-    # Disable write access to the dict
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    clear = _immutable
-    setdefault = _immutable  # type: ignore
-    popitem = _immutable
+    def __iter__(self):
+        return iter(self._dict)
 
-    def update(self, e=None, **f):
-        raise TypeError('object is immutable')
+    def __len__(self):
+        return len(self._dict)
 
-    def pop(self, k, d=None):
-        raise TypeError('object is immutable')
+    def __contains__(self, __o: object) -> bool:
+        return __o in self._dict
+
+    def __eq__(self, __o: object) -> bool:
+        return self._dict == __o
+
+    def get(self, key, default=None):
+        return self._dict.get(key, default)
+
+    def items(self):
+        return self._dict.items()
+
+    def keys(self):
+        return self._dict.keys()
+
+    def values(self):
+        return self._dict.values()
 
 
-def freeze(obj):
+def freeze(obj, memo: set[int] = None):
     """
     Freeze an object by making it immutable and thus hashable.
     """
-    if isinstance(obj, dict):
+    if memo is None:
+        memo = set()
+    if id(obj) in memo:
+        raise ValueError("Cannot freeze recursive data structures")
+    memo.add(id(obj))
+
+    if isinstance(obj, MutableMapping):
         # Transform dicts into ``FrozenDict``s
-        return FrozenDict((k, freeze(v)) for k, v in obj.items())
-    if isinstance(obj, list):
+        return FrozenDict((k, freeze(v, memo.copy())) for k, v in obj.items())
+    if isinstance(obj, MutableSequence):
         # Transform lists into tuples
-        return tuple(freeze(el) for el in obj)
-    if isinstance(obj, set):
+        return tuple(freeze(el, memo.copy()) for el in obj)
+    if isinstance(obj, MutableSet):
         # Transform sets into ``frozenset``s
-        return frozenset(obj)
+        return frozenset(freeze(item, memo.copy()) for item in obj)
     return obj
 
 

@@ -446,9 +446,6 @@ class Table(Generic[IDVar, DocVar]):
         :returns: the document or ``None``
         """
 
-        if doc_id is not None and cond is not None:
-            raise ValueError('Only one of cond and doc_id can be specified')
-
         if doc_id is not None:
             # Retrieve a document specified by its ID
             table = await self._read_table()
