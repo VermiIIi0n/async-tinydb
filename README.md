@@ -24,11 +24,11 @@ I will try to keep up with the latest version of `TinyDB`.
 
 # New Features
 
-* **Event hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
+* **Event Hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
 
-* **Redesigned ID & Doc class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
+* **Redesigned ID & Doc Class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
   
-* **DB-level caching**: This significantly improves the performance of all operations. However, the responsibility of converting the data to the correct type is transferred to the Storage[^2][^disable-db-level]. 
+* **DB-level Caching**: This significantly improves the performance of all operations. However, the responsibility of converting the data to the correct type is transferred to the Storage[^2][^disable-db-level]. 
 
 * **Built-in `Modifier`**: Use `Modifier` to easily [encrypt](#encryption), [compress](./docs/Modifier.md#Compression) and [extend types](./docs/Modifier.md#Conversion) of your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
 
@@ -36,7 +36,7 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **Atomic Write**: **A**CID!
 
-* **Batch search by IDs**: `search` method now takes an extra `doc_ids` argument (works like an additional condition)
+* **Batch Search By IDs**: `search` method now takes an extra `doc_ids` argument (works like an additional condition)
 
 # How to use it?
 
@@ -63,7 +63,7 @@ That's it.
 
 ******
 
-## Documents For Advances Usage
+## Documents For Advanced Usage
 
 * [Modifier](./docs/Modifier.md)
 * [Event Hooks](./docs/EventHooks.md)
@@ -134,8 +134,8 @@ db.isolevel = 2
 `isolevel`:
 
 0. No isolation
-1. Serialised CRUD operations (Also ensures thread safety) (default)
-2. Deepcopy documents on CRUD (Ensures `Index` & `Query Cache` consistency)
+1. Serialised(Atomic) CRUD operations (Also ensures thread safety) (default)
+2. Deepcopy documents on insertion and searching (**CR**UD) (Ensures `Index` & `Query Cache` consistency)
 
 
 

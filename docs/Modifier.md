@@ -24,7 +24,8 @@ async def main():
 asyncio.run(main())
 
 ```
-That's it! After calling `Modifier.Encryption.AES_GCM`, the database will be encrypted.  
+That's it! 
+After calling `Modifier.Encryption.AES_GCM`, the database will be encrypted.  
 **Applying modifiers at the beginning of the database instantiation is strongly recommended.**
 
 ## Order
@@ -93,7 +94,7 @@ Modifier.Encryption.AES_GCM(db, "your key goes here")
 **Order-Aware**
 
 This subclass contains methods to add compression to the storage.
-## `brotli`
+### `brotli`
 
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`
@@ -107,7 +108,7 @@ db = TinyDB("db.json", access_mode="rb+")  # Binary mode is required
 Modifier.Compression.brotli(db)
 ```
 
-##  `blosc2`
+###  `blosc2`
 
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`
@@ -124,7 +125,7 @@ Modifier.Compression.blosc2(db)
 
 This subclass contains methods to convert the data to a different format.
 
-## `ExtendedJSON`
+### `ExtendedJSON`
 
 * `events`: `write.pre`, `read.post`
 * `input`: `dict`
@@ -132,7 +133,8 @@ This subclass contains methods to convert the data to a different format.
 
 This method allows JSONStorage to store more data types.
 
-### Extended Types
+#### Extended Types
+
 * `uuid.UUID`
 * `datetime.datetime`: Converted to `ISO 8601` format.
 * `datetime.timestamp`
@@ -149,11 +151,11 @@ db = TinyDB("db.json")
 Modifier.Converter.ExtendedJSON(db)
 ```
 
-### Customise Extended Types
+#### Customise Extended Types
 
 By passing `type_hooks` and `marker_hooks` arguments to the modifier, you can modifiy the behaviour of the conversion.
 
-### To modify `type_hooks`
+##### To modify `type_hooks`
 
 ```Python
 type_hooks = {
@@ -162,16 +164,16 @@ type_hooks = {
 }
 ```
 
-The first argument is the data to be converted.  
-The second argument is the converter function, useful when you are dealing with `Container` types.
+The first argument `x` is the data to be converted.  
+The second argument `c` is the converter function, useful when you are dealing with `Container` types.
 
-In this example, we convert `int` to a `dict` with a `$int` key (i.e. `42` -> `{"$int": "42"}`), and we remove `set` from the conversion.  
+In this example, we convert `int` to a `dict` with a `$int` key and a `str` as the value(i.e. `42` -> `{"$int": "42"}`), and we remove `set` from the conversion.  
 Return value of the hook does not necessarily have to be a `dict`. It can be anything that is JSON serializable.
 
-### To modify `marker_hooks`
+##### To modify `marker_hooks`
 
 A marker is a special key that is used to identify the type of the data.  
-We use a MongoDB style marker by default (starts with `'$'`), but you can change it to anything you want.
+We use a MongoDB style marker by default (a `str` starts with `'$'`), but you can change it to anything you want.
 
 ```Python
 marker_hooks = {
@@ -179,7 +181,39 @@ marker_hooks = {
 }
 ```
 
-The first argument is the data to be converted.  
-The second argument is the reverse converter function, useful when you are dealing with `Container` types.
+The first argument `x` is the data to be converted.  
+The second argument `r` is the reverse converter function, useful when you are dealing with `Container` types.
 
 In this example, we convert `dict` with the `$int` marker back to an `int` (i.e. `{"$int":"42"}` -> `42`).
+
+##### A more complicated example
+
+```Python
+import asyncio
+from asynctinydb import TinyDB, Modifier
+
+class Myclass:
+  def __init__(self, value: bytes):
+    self.value = value
+
+type_hooks = {
+  Myclass: lambda x, c: {"$Myclass": c(x.value)}
+  # Converts `bytes` with the converter
+}
+
+marker_hooks = {
+  "$Myclass": lambda x, r: Myclass(r(x["$Myclass"]))
+  # Converts back to `bytes` then pass it to Myclass
+}
+
+async def main():
+  async with TinyDB("test.json") as db:
+    Modifier.Conversion.ExtendedJSON(db, 
+                                     type_hooks=type_hooks, 
+                                     marker_hooks=marker_hooks
+                                    )
+    db.insert({"test": Myclass(b"some bytes")})
+
+asyncio.run(main())
+```
+
