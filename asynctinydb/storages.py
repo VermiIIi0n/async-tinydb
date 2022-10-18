@@ -5,18 +5,18 @@ implementations.
 from __future__ import annotations
 import io
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar
+from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar, cast
 import os
 from tempfile import NamedTemporaryFile
 import ujson as json
 from .event_hooks import EventHook, ActionChain, EventHint, ActionCentipede
 from .event_hooks import AsyncActionType
-from .utils import AsinkRunner
+from .utils import AsinkRunner, stringfy_keys
 
 __all__ = ("Storage", "JSONStorage", "MemoryStorage")
 
 
-def touch(path: str, create_dirs: bool):
+def touch(path: str, create_dirs: bool) -> None:
     """
     Create a file if it doesn't exist yet.
 
@@ -46,13 +46,13 @@ class Storage(ABC):
     # Using ABCMeta as metaclass allows instantiating only storages that have
     # implemented read and write
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Create event hook
         self._event_hook = EventHook()
         self._on = EventHint(self._event_hook)
 
     @property
-    def on(self) -> StorageHints:
+    def on(self) -> EventHint:
         """
         Event hook for storage events.
         """
@@ -85,7 +85,7 @@ class Storage(ABC):
         raise NotImplementedError('To be overridden!')
 
     @abstractmethod
-    async def write(self, data: Mapping) -> None:
+    async def write(self, data: Mapping[Any, Any]) -> None:
         """
         Write the current state of the database to the storage.
 
@@ -102,7 +102,22 @@ class Storage(ABC):
         """
 
 
-class JSONStorage(Storage):
+class StorageWithWriteReadPrePostHooks(Storage):
+    @property
+    def on(self) -> StorageWriteReadPrePostHint:
+        """
+        Event hook for storage events.
+
+        * `write.pre`: Called before processing raw data.
+        * `write.post`: Called after processing raw data.
+        * `read.pre`: Called before processing raw data.
+        * `read.post`: Called after processing raw data.
+        """
+
+        return self._on  # type: ignore[return-value]
+
+
+class JSONStorage(StorageWithWriteReadPrePostHooks):
     """
     Store the data in a JSON file.
     """
@@ -152,10 +167,12 @@ class JSONStorage(Storage):
         _chain = ActionCentipede[AsyncActionType]
         self.event_hook.hook("write.pre", _chain(sentinel=sentinel))
         self.event_hook.hook("write.post", _chain(sentinel=sentinel))
-        self.event_hook.hook("read.pre", _chain(reverse=True, sentinel=sentinel))
-        self.event_hook.hook("read.post", _chain(reverse=True, sentinel=sentinel))
+        self.event_hook.hook("read.pre", _chain(
+            reverse=True, sentinel=sentinel))
+        self.event_hook.hook("read.post", _chain(
+            reverse=True, sentinel=sentinel))
         self.event_hook.hook("close", ActionChain[AsyncActionType]())
-        self._on = StorageHints(self._event_hook)  # Add hints for event hooks
+        self._on = StorageWriteReadPrePostHint(self._event_hook)
 
     @property
     def closed(self) -> bool:
@@ -184,7 +201,8 @@ class JSONStorage(Storage):
             return None
 
         # Pre-process data
-        pre: str | bytes = await self._event_hook.aemit("read.pre", self, raw)
+        pre = cast(str | bytes | None,
+                   await self._event_hook.aemit("read.pre", self, raw))
         raw = pre if pre is not None else raw or "{}"
 
         # Deserialize the data
@@ -200,10 +218,11 @@ class JSONStorage(Storage):
         await self._prep()
 
         # Pre-process data
-        pre = await self._event_hook.aemit("write.pre", self, data)
+        pre = cast(Mapping | None,
+                   await self._event_hook.aemit("write.pre", self, data))
         data = pre if pre is not None else data
         # Convert keys to strings
-        data = await self._sink.run(self._stringify_keys, data)
+        data = await self._sink.run(stringfy_keys, data)
 
         # Serialize the database state using the user-provided arguments
         task = self._sink.run(json.dumps, data or {}, **self.kwargs)
@@ -212,7 +231,7 @@ class JSONStorage(Storage):
         # Post-process the serialized data
         if 'b' in self._mode and isinstance(serialized, str):
             serialized = serialized.encode("utf-8")
-        post: str | bytes = await self._event_hook.aemit(
+        post: str | bytes | None = await self._event_hook.aemit(  # type: ignore
             "write.post", self, serialized)
         serialized = post if post is not None else serialized
 
@@ -235,7 +254,6 @@ class JSONStorage(Storage):
         # Open the temp file
         with NamedTemporaryFile(mode=self._mode, encoding=self._encoding,
                                 delete=False) as f:
-
             f.write(data)
 
             # Remove data that is behind the new cursor in case the file has
@@ -249,21 +267,6 @@ class JSONStorage(Storage):
 
             # Use os.replace to ensure atomicity
             os.replace(f.name, self._path)
-
-    @classmethod
-    def _stringify_keys(cls, data, memo: dict = None):
-        if memo is None:
-            memo = {}
-        if isinstance(data, MutableMapping):
-            if id(data) in memo:
-                return memo[id(data)]
-            memo[id(data)] = {}  # Placeholder in case of loop references
-            memo[id(data)].update((str(k), cls._stringify_keys(v, memo))
-                                  for k, v in data.items())
-            return memo[id(data)]
-        if isinstance(data, list | tuple):
-            return [cls._stringify_keys(v, memo) for v in data]
-        return data
 
     def __del__(self):
         try:
@@ -391,7 +394,7 @@ class _read_hint(EventHint):
         """
 
 
-class StorageHints(EventHint):
+class StorageWriteReadPrePostHint(EventHint):
     """
     Event hints for the storage class.
     """

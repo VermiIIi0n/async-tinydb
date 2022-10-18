@@ -104,7 +104,7 @@ def test_mimics():
         dict(*args, **kw)
 
     # init(123)
-    
+
     assert init.__name__ == 'init'
 
 
@@ -267,7 +267,7 @@ async def test_sync_await_threadsafe_exc():
 
     t = Thread(target=run_type_error, daemon=True)
     t.start()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
 
 
 def test_sync_await_threadsafe_on_closed_loop():
@@ -507,7 +507,7 @@ async def test_asinkrunner_exc():
         await sink.run(exc)
 
     with pytest.raises(ValueError):
-        sink.run_as(-1, lambda: 1)
+        await sink.run_as(-1, lambda: 1)
 
     with pytest.raises(ValueError):
         sink.sync_run_as(-1, lambda: 1)

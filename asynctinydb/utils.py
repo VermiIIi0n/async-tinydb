@@ -17,7 +17,8 @@ T = TypeVar("T")
 S = TypeVar("S", bound="StrChain")
 C = TypeVar("C", bound=Callable)
 
-__all__ = (("LRUCache", "freeze", "with_typehint", "StrChain", "FrozenDict", "mimics")
+__all__ = (("LRUCache", "freeze", "with_typehint", "stringfy_keys"
+            "StrChain", "FrozenDict", "mimics")
            + async_utils.__all__)
 
 
@@ -52,6 +53,21 @@ def with_typehint(baseclass: Type[T]):
 
     # Otherwise: just inherit from `object` like a regular Python class
     return object
+
+
+def stringfy_keys(data, memo: dict = None):
+    if memo is None:
+        memo = {}
+    if isinstance(data, MutableMapping):
+        if id(data) in memo:
+            return memo[id(data)]
+        memo[id(data)] = {}  # Placeholder in case of loop references
+        memo[id(data)].update((str(k), stringfy_keys(v, memo))
+                              for k, v in data.items())
+        return memo[id(data)]
+    if isinstance(data, list | tuple):
+        return [stringfy_keys(v, memo) for v in data]
+    return data
 
 
 class LRUCache(MutableMapping, Generic[K, V]):
@@ -164,7 +180,8 @@ class FrozenDict(Mapping[K, V]):
     def __hash__(self):
         if self._hash is None:
             # Calculate the hash by hashing a tuple of sorted hashes of dict k/v pairs
-            self._hash = hash(tuple(sorted(hash((k, v)) for k, v in self.items())))
+            self._hash = hash(tuple(sorted(hash((k, v))
+                              for k, v in self.items())))
         return self._hash
 
     def __getitem__(self, key):
@@ -275,7 +292,8 @@ class StrChain(Sequence[str]):
         return self._callback(self, *args, **kw)
 
     def __create(self: S, it: Iterable[str]) -> S:
-        return type(self)(it=it, joint=self._joint, callback=self._callback, **self._kw)
+        return type(self)(it=it, joint=self._joint,
+                          callback=self._callback, **self._kw)
 
     def __len__(self: S) -> int:
         return len(self._list)

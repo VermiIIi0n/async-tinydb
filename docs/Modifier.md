@@ -69,7 +69,7 @@ Similar methods are grouped into subclasses.
 **Order-Aware**
 
 This subclass contains methods to add encryption to the storage.
-## `AES_GCM`
+### `AES_GCM`
 
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`

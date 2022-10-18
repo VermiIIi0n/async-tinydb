@@ -363,6 +363,12 @@ async def test_storage_event_hooks(tmpdir):
         @storage.on.read.not_a_event
         async def r(*arg):
             ...
+
+    ms = MemoryStorage()
+    with pytest.raises(AttributeError):
+        @ms.on.read.not_a_event
+        async def r(*arg):
+            ...
     # Test multiple modifiers
     storage.event_hook.clear_actions()
 
@@ -378,16 +384,6 @@ async def test_file_closed():
             await storage.read()
         with pytest.raises(IOError):
             await storage.write({})
-
-
-# async def test_multi_files(tmpdir):
-#    for _ in range(1024):
-#        path = str(tmpdir.join('test.db'))
-#        async with TinyDB(path, storage=JSONStorage) as db:
-#            await db.insert(doc)
-#            assert [doc] == await db.all()
-#            await db.drop_tables()
-#            await db.close()
 
 
 async def test_encrypted_json(tmpdir):
@@ -520,7 +516,8 @@ async def test_extended_json(tmpdir):
         Dummy: lambda d, c: {"$dummy": d.value},
         tuple: None,
     }
-    marker_hooks = {"$dummy": lambda d, c: Dummy(d["$dummy"]), "$complex": None}
+    marker_hooks = {"$dummy": lambda d,
+                    c: Dummy(d["$dummy"]), "$complex": None}
     Modifier.Conversion.ExtendedJSON(
         storage, type_hooks=type_hooks, marker_hooks=marker_hooks)
 

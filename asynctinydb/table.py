@@ -336,6 +336,7 @@ class Table(Generic[IDVar, DocVar]):
         doc_ids = []
 
         def updater(table: dict[IDVar, DocVar]):
+            existing_keys = table.keys()
             for document in documents:
 
                 # Make sure the document implements the ``Mapping`` interface
@@ -364,7 +365,7 @@ class Table(Generic[IDVar, DocVar]):
                 # Generate new document ID for this document
                 # Store the doc_id, so we can return all document IDs
                 # later, then save the document with the new doc_id
-                doc_id = self._get_next_id(table.keys())
+                doc_id = self._get_next_id(existing_keys)
                 doc_ids.append(doc_id)
                 table[doc_id] = self.document_class(document, doc_id)
 
@@ -585,7 +586,7 @@ class Table(Generic[IDVar, DocVar]):
             # during iteration)
             for doc_id in list(table.keys()):
                 for fields, cond in updates:
-                    _cond = cast(QueryLike, cond)
+                    _cond = cond
 
                     # Pass through all documents to find documents matching the
                     # query. Call the processing callback with the document ID
@@ -841,8 +842,7 @@ class Table(Generic[IDVar, DocVar]):
         cacheable = cacheable and limit >= 0  # If the limit is not reached
 
         if cacheable:
-            if TYPE_CHECKING:  # Make stupid mypy happy
-                assert cond is not None  # skipcq: BAN-B101
+            cond = cast(QueryLike, cond)
             # Update the query cache
             self._query_cache[cond] = tuple(docs.keys())
 

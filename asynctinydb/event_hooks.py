@@ -27,7 +27,7 @@ class BaseActionChain(Sequence[ActionVar]):
         * `limit` is the maximum number of actions to add to the chain. 
         Set to 0 for unlimited.
         """
-        self._seq = list[ActionVar](actions or [])
+        self._seq: list[ActionVar] = list(actions or [])
         self.limit = limit
 
     def append(self, action: ActionVar) -> None:
@@ -232,6 +232,7 @@ class EventHook(dict[str, BaseActionChain]):
     # Event Hook Class
     Binds events to action chains.
     """
+
     def __init__(self, chain: Mapping[str, Iterable[ActionVar]] | None = None):
         dict.__init__(self)
         if chain is not None:

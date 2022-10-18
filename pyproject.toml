@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.5.0"
+version = "1.5.1"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -33,12 +33,56 @@ packages = [
     { include = "asynctinydb" }
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--verbose --cov-append --cov-report term --cov asynctinydb --cov-config .coveragerc"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["W291", "E704", "E266"]
+
+[tool.mypy]
+enable_error_code = [
+    "type-var", 
+    "call-overload", 
+    "abstract", 
+    "override", 
+    "unused-awaitable",
+    "unused-coroutine",
+    "var-annotated", 
+    "index", 
+    "assignment", 
+    "var-annotated", 
+    "misc",
+    "redundant-cast",
+    "comparison-overlap",
+    "redundant-expr",
+    "truthy-bool"
+    ]
+disable_error_code = ["type-arg", "no-untyped-def", "no-untyped-call", "no-redef"]
+plugins = "asynctinydb/mypy_plugin.py"
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_column_numbers = true
+show_error_context = true
+warn_unreachable = false
+show_error_codes = true
+warn_return_any = false
+warn_no_return = true
+show_traceback = false
+color_output = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
 [tool.poetry.urls]
 "Issues" = "https://github.com/VermiIIi0n/async-tinydb/issues"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-typing-extensions = { version = "^3.10.0 || ^4.0.0", python = "<=3.10" }
 nest-asyncio = "^1.5.5"
 ujson = "^5.4.0"
 pycryptodome = {version = "^3.15.0", optional = true}

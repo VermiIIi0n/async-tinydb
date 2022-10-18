@@ -18,13 +18,13 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`[^1]
 
-* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented. An `IOError` should be raised.
+* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented[^why-closed][^operating-on-closed].
 
-* **[Miscellaneous](#misc)**: Differences only matter in edge cases.
+* **[Miscellaneous](#misc)**: Differences that only matter in edge cases.
 
 # New Features
 
-* **Event Hooks**: You can now use event hooks to do something before or after an operation. See [Event Hooks](#event-hooks) for more details.
+* **Event Hooks**: You can now use event hooks to hook into an operation. See [Event Hooks](#event-hooks) for more details.
 
 * **Redesigned ID & Doc Class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
   
@@ -266,7 +266,7 @@ Make sure you have implemented all the methods required by  `BaseDocument` class
 * `search` accepts optional `cond`, returns all docs if no arguments are provided
 * `get` and `contains` raises `ValueError` instead of `RuntimeError` when `cond` and `doc_id` are both `None`
 * `LRUCache` stores `tuple`s of ids instead of `list`s of docs
-* `search` and `get` treat `doc_id` and `doc_ids` as extra conditions instead of ignoring conditions when they are provided. That is to say, when `cond` and `doc_id(s)` are passed, they return docs satisfies both conditions.
+* `search` and `get` treat `doc_id` and `doc_ids` as extra conditions instead of ignoring conditions when they are provided. That is to say, when `cond` and `doc_id(s)` are passed, they return docs satisfies both `cond` and `doc_id(s)`.
 
 
 
@@ -275,3 +275,6 @@ Make sure you have implemented all the methods required by  `BaseDocument` class
 [^UUID-version]:Currently using UUID4
 [^disable-db-level]: See [DB-level caching](#db-level-caching) to learn how to disable this feature if it causes dirty reads.
 [^isolevel]: See [isolevel](#isolation-level)
+[^why-closed]: This is for `Middileware` classes to reliably determine whether the `Storage` is closed, so they can raise `IOError`
+[^operating-on-closed]: An `IOError` should be raised when operating on a closed storage.
+

@@ -6,7 +6,7 @@ from functools import partial
 import os.path
 import tempfile
 
-import pytest  # type: ignore
+import pytest
 
 enc = Modifier.Encryption
 comp = Modifier.Compression

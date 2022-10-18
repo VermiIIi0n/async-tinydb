@@ -184,7 +184,7 @@ def get_create_loop():
     try:
         return asyncio.get_running_loop()
     except RuntimeError:
-        loop: asyncio.AbstractEventLoop = getattr(_LOCAL, "loop", None)
+        loop: asyncio.AbstractEventLoop | None = getattr(_LOCAL, "loop", None)
         if loop is None or loop.is_closed():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)

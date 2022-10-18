@@ -3,19 +3,20 @@ This module contains the main component of TinyDB: the database.
 """
 
 from __future__ import annotations
-from typing import AsyncGenerator, Type, overload, TypeVar, Generic
+from typing import AsyncGenerator, Type, overload, TypeVar, Generic, Any
 
 from .storages import Storage, JSONStorage
+from .middlewares import Middleware
 from .table import Table, Document, IncreID, IDVar, DocVar, BaseDocument
 from .utils import with_typehint, sync_await
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.
 TableBase: Type[Table] = with_typehint(Table)
-_S = TypeVar("_S", bound=Storage)
+S = TypeVar("S", bound=Storage, covariant=True)
 
 
-class TinyDB(Generic[_S], TableBase):
+class TinyDB(Generic[S], TableBase):
     """
     The main class of TinyDB.
 
@@ -86,16 +87,14 @@ class TinyDB(Generic[_S], TableBase):
     default_storage_class = JSONStorage
 
     @overload
-    def __init__(self: TinyDB[_S], *args, storage: Type[_S], **kw) -> None:
-        ...
-
+    def __init__(self: TinyDB[S], *args, storage: Type[S], **kw) -> None:
+        """For `Storage` classes passed to `storage`"""
     @overload
-    def __init__(self: TinyDB[Storage], *args, storage, **kw) -> None:
-        ...
-
+    def __init__(self: TinyDB[S], *args, storage: Middleware[S], **kw) -> None:
+        """For `Middleware` passed to `storage`"""
     @overload
     def __init__(self: TinyDB[JSONStorage], *args, **kw) -> None:
-        ...
+        """For default `JSONStorage`"""
 
     def __init__(self, *args, **kw) -> None:
         """
@@ -109,7 +108,7 @@ class TinyDB(Generic[_S], TableBase):
         self._no_dbcache: bool = kw.pop("no_dbcache", False)
 
         # Prepare the storage
-        self._storage: _S = kw.pop(
+        self._storage: S = kw.pop(
             "storage", type(self).default_storage_class)(*args, **kw)
 
         self._opened = True
@@ -271,7 +270,7 @@ class TinyDB(Generic[_S], TableBase):
         await self.storage.write(data)
 
     @property
-    def storage(self) -> _S:
+    def storage(self) -> S:
         """
         Get the storage instance used for this TinyDB instance.
 

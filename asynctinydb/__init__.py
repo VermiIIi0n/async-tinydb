@@ -26,6 +26,7 @@ Usage example:
 
 from .queries import Query, where
 from .storages import Storage, JSONStorage, EncryptedJSONStorage, MemoryStorage
+from .middlewares import CachingMiddleware
 from .modifier import Modifier
 from .database import TinyDB
 from .version import __version__  # noqa
@@ -34,6 +35,7 @@ from .table import BaseID, BaseDocument, IncreID, Document, UUID
 __all__ = (
     "TinyDB", "Storage", "JSONStorage",
     "EncryptedJSONStorage", "MemoryStorage",
+    "CachingMiddleware",
     "Query", "where", "BaseID", "BaseDocument",
     "Modifier", "IncreID", "Document", "UUID"
 )

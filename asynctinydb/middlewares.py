@@ -3,10 +3,14 @@ Contains the :class:`base class <asynctinydb.middlewares.Middleware>` for
 middlewares and implementations.
 """
 
+from __future__ import annotations
+from typing import TypeVar, Type, Generic
 from .storages import Storage
 
+S = TypeVar('S', bound=Storage, covariant=True)
 
-class Middleware:
+
+class Middleware(Generic[S]):
     """
     The base class for all Middlewares.
 
@@ -17,9 +21,9 @@ class Middleware:
     constructor so the middleware chain can be configured properly.
     """
 
-    def __init__(self, storage_cls):
+    def __init__(self, storage_cls: Type[S]):
         self._storage_cls = storage_cls
-        self.storage: Storage = None
+        self.storage: Storage = None  # type: ignore
 
     @property
     def on(self):
@@ -80,7 +84,7 @@ class Middleware:
         return getattr(self.__dict__['storage'], name)
 
 
-class CachingMiddleware(Middleware):
+class CachingMiddleware(Middleware[S]):
     """
     Add some caching to TinyDB.
 
@@ -89,7 +93,7 @@ class CachingMiddleware(Middleware):
     from cache.
     """
 
-    def __init__(self, storage_cls, cache_size=1000):
+    def __init__(self, storage_cls: Type[S], cache_size=1000):
         # Initialize the parent constructor
         super().__init__(storage_cls)
 

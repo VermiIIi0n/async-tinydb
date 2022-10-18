@@ -4,15 +4,16 @@ from __future__ import annotations
 from typing import Any, Callable, TypeVar
 from warnings import warn
 from functools import partial
-from .storages import Storage
+from .storages import Storage, StorageWithWriteReadPrePostHooks
 from .utils import async_run
 from .database import TinyDB
 
 
-_S = TypeVar('_S', bound=Storage)
+S = TypeVar('S', bound=Storage)
+SWRPH = TypeVar("SWRPH", bound=StorageWithWriteReadPrePostHooks)
 
 
-def _get_storage(item: _S | TinyDB[_S]) -> _S:
+def _get_storage(item: S | TinyDB[S]) -> S:
     """Get the storage from a TinyDB or Storage object."""
     if isinstance(item, TinyDB):
         return item.storage
@@ -27,7 +28,7 @@ class Modifier:
         """
 
         @staticmethod
-        def AES_GCM(s: _S | TinyDB[_S], key: str | bytes, **kw) -> _S:
+        def AES_GCM(s: SWRPH | TinyDB[SWRPH], key: str | bytes, **kw) -> SWRPH:
             """
             ### Add AES-GCM Encryption to TinyDB Storage
             Hooks to `write.post` and `read.pre` to encrypt/decrypt data.
@@ -71,8 +72,8 @@ class Modifier:
             async def decrypt_aes_gcm(_: str, s: Storage, data: bytes):
                 d_len = data[0]  # digest length
                 digest = data[1: d_len + 1]
-                cipher: GcmMode = AES.new(
-                    key, nonce=data[d_len + 1:d_len + 17], **kw)  # type: ignore
+                cipher: GcmMode = AES.new(key,  # type: ignore
+                                          nonce=data[d_len + 1:d_len + 17], **kw)
                 data = data[d_len + 17:]
                 task = async_run(cipher.decrypt_and_verify, data, digest)
                 ret = await task
@@ -84,8 +85,8 @@ class Modifier:
             return s
 
     @classmethod
-    def add_encryption(cls, s: _S | TinyDB[_S], key: str | bytes,
-                       encoding=None, **kw) -> _S:
+    def add_encryption(cls, s: SWRPH | TinyDB[SWRPH], key: str | bytes,
+                       encoding: str = None, **kw) -> SWRPH:
         """
         ### Add AES-GCM Encryption to TinyDB Storage
         **Deprecated, consider using Modifier.Encryption.AES_GCM**
@@ -113,7 +114,7 @@ class Modifier:
         """
 
         @staticmethod
-        def brotli(s: _S | TinyDB[_S], quality=11, **kw) -> _S:
+        def brotli(s: SWRPH | TinyDB[SWRPH], quality=11, **kw) -> SWRPH:
             """
             ### Add Brotli Compression to TinyDB Storage
             Hooks to `write.post` and `read.pre` to compress/decompress data.
@@ -153,7 +154,7 @@ class Modifier:
             return s
 
         @staticmethod
-        def blosc2(s: _S | TinyDB[_S], clevel=9, **kw) -> _S:
+        def blosc2(s: SWRPH | TinyDB[SWRPH], clevel=9, **kw) -> SWRPH:
             """
             ### Add Blosc2 Compression to TinyDB Storage
             Hooks to `write.post` and `read.pre` to compress/decompress data.
@@ -198,13 +199,13 @@ class Modifier:
         """
 
         @staticmethod
-        def ExtendedJSON(s: _S | TinyDB[_S],
+        def ExtendedJSON(s: SWRPH | TinyDB[SWRPH],
                          type_hooks: dict[type, None | Callable[[
                              Any, Callable[[Any], Any]],
                              dict[str, Any]]] = None,
                          marker_hooks: dict[str, None | Callable[[
                              dict[str, Any], Callable[[Any], Any]],
-                             Any]] = None) -> _S:
+                             Any]] = None) -> SWRPH:
             """
             ### Extend JSON Data Types
 
@@ -325,7 +326,7 @@ class Modifier:
                             ret = hook(obj, _convert)
                 return ret
 
-            def recover(obj):
+            def recover(obj) -> Any:
                 """
                 ### Recursively recovery object from extended JSON
                 **No loop reference check**
