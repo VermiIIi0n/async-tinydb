@@ -245,12 +245,15 @@ class Table(Generic[IDVar, DocVar]):
         self._storage = storage
         self._name = name
         self._cache: dict[IDVar, DocVar] = None  # type: ignore
-        self._query_cache: LRUCache[QueryLike, list[DocVar]] \
+        """Cache for documents in this table."""
+        self._query_cache: LRUCache[QueryLike, tuple[IDVar, ...]] \
             = self.query_cache_class(capacity=cache_size)
+        """Cache for query results in this table."""
 
         self.document_id_class.clear_cache(self)  # clear the ID cache
 
         self._isolevel = 0
+        self._closed = False
         self._sink = AsinkRunner()
         """Serialise all operations on this table."""
 
@@ -382,53 +385,25 @@ class Table(Generic[IDVar, DocVar]):
         # of all documents by using the ``list`` constructor to perform the
         # conversion.
 
-        return [i async for i in self]
+        return await self.search()
 
     async def search(
             self,
-            cond: QueryLike,
-            limit: int = None) -> list[DocVar]:
+            cond: QueryLike = None,
+            limit: int = None,
+            doc_ids: Iterable[IDVar] = None) -> list[DocVar]:
         """
-        Search for all documents matching a 'where' cond.
+        Search for all documents matching a 'where' cond,
+        whilst they ids are in `doc_ids`(if specified).
 
-        :param cond: the condition to check against
-        :returns: list of matching documents
+        * `cond`: the condition to check against
+        * `limit`: the maximum number of documents to return, `None` for no limit
+        * `doc_ids`: an iterable of document IDs to search in
         """
 
-        # First, we check the query cache to see if it has results for this
-        # query
-        cached_results = self._query_cache.get(cond)
-        if cached_results is not None:
-            if self._isolevel >= 2:
-                return cached_results
-            return cached_results.copy()
-
-        # Perform the search by applying the query to all documents.
-        # Then, only if the document matches the query, convert it
-        # to the document class and document ID class.
         table = await self._read_table()
-        docs = await self._run_with_iso(self._search, cond, table, limit)
-
-        # Only cache cacheable queries.
-        #
-        # This weird `getattr` dance is needed to make MyPy happy as
-        # it doesn't know that a query might have a `is_cacheable` method
-        # that is not declared in the `QueryLike` protocol due to it being
-        # optional.
-        # See: https://github.com/python/mypy/issues/1424
-        #
-        # Note also that by default we expect custom query objects to be
-        # cacheable (which means they need to have a stable hash value).
-        # This is to keep consistency with TinyDB's behavior before
-        # `is_cacheable` was introduced which assumed that all queries
-        # are cacheable.
-        is_cacheable: Callable[[], bool] = getattr(cond, "is_cacheable",
-                                                   lambda: True)
-        if is_cacheable():
-            # Update the query cache
-            self._query_cache[cond] = docs
-
-        return deepcopy(docs) if self._isolevel >= 2 else docs.copy()
+        ret = await self._run_with_iso(self._search, cond, table, limit, doc_ids)
+        return list(ret.values())
 
     async def get(
         self,
@@ -446,31 +421,15 @@ class Table(Generic[IDVar, DocVar]):
         :returns: the document or ``None``
         """
 
-        if doc_id is not None:
-            # Retrieve a document specified by its ID
-            table = await self._read_table()
-            doc = table.get(doc_id, None)
+        if cond is None and doc_id is None:
+            raise ValueError("You have to pass either cond or doc_id")
 
-            if doc is None:
-                return None
-
-            # Make a copy of the document so we don't modify the original
-            if self._isolevel >= 2:
-                return deepcopy(doc)
-            return self.document_class(doc, doc_id)
-
-        if cond is not None:
-            # Find a document specified by a query
-            # The trailing underscore in doc_id_ is needed so MyPy
-            # doesn't think that `doc_id_` (which is a string) needs
-            # to have the same type as `doc_id` which is this function's
-            # parameter and is an optional `int`.
-            table = await self._read_table()
-            ret = await self._run_with_iso(self._search, cond, table, 1)
-
-            return ret[0] if ret else None
-
-        raise RuntimeError('You have to pass either cond or doc_id')
+        table = await self._read_table()
+        doc_ids = None if doc_id is None else (doc_id,)
+        ret = await self._run_with_iso(self._search, cond, table, 1, doc_ids)
+        if ret:
+            return ret.popitem()[1]
+        return None
 
     async def contains(
         self,
@@ -486,15 +445,9 @@ class Table(Generic[IDVar, DocVar]):
         :param cond: the condition use
         :param doc_id: the document ID to look for
         """
-        if doc_id is not None:
-            # Documents specified by ID
-            return (await self.get(doc_id=doc_id)) is not None
-
-        if cond is not None:
-            # Document specified by condition
-            return (await self.get(cond)) is not None
-
-        raise RuntimeError('You have to pass either cond or doc_id')
+        if cond is None and doc_id is None:
+            raise ValueError("You have to pass either cond or doc_id")
+        return (await self.get(cond, doc_id=doc_id)) is not None
 
     async def update(
         self,
@@ -777,23 +730,34 @@ class Table(Generic[IDVar, DocVar]):
         Close the table.
         """
 
-        self.clear_cache()
-        self.clear_data_cache()
-        await self._sink.aclose()
+        if not self._closed:
+            self.clear_cache()
+            self.clear_data_cache()
+            await self._sink.aclose()
+            self._closed = True
 
     def clear_cache(self) -> None:
         """
         Clear the query cache.
+
+        Scheduled to be executed immediately
         """
 
-        self._query_cache.clear()
+        # Put function in execution queue and run with a higher priority
+        # This is to ensure thread safety
+        self._sink.sync_run_as(2, self._query_cache.clear).result()
 
     def clear_data_cache(self):
         """
         Clear the DB-level cache.
+
+        Scheduled to be executed immediately
         """
 
-        self._cache = None
+        def updater():
+            self._cache = None
+        # Put function in execution queue and run with a higher priority
+        self._sink.sync_run_as(2, updater).result()
 
     def __len__(self):
         """
@@ -832,21 +796,59 @@ class Table(Generic[IDVar, DocVar]):
         """
         self._sink.close()
 
-    def _search(self, cond: Callable[[Mapping], bool],
-                data: dict[IDVar, DocVar], limit: int = None) -> list[DocVar]:
-        docs: list[DocVar] = []
-        count = 0
-        for doc_id, doc in data.items():
-            if cond(doc):
-                if limit is not None and count >= limit:
-                    break
-                if self._isolevel >= 2:
-                    doc = deepcopy(doc)
-                else:
-                    doc = self.document_class(doc, doc_id=doc_id)
-                docs.append(doc)
-                count += 1
-        return docs
+    def _search(self, cond: QueryLike | None,
+                docs: dict[IDVar, DocVar],
+                limit: int | None,
+                doc_ids: Iterable[IDVar] | None) -> dict[IDVar, DocVar]:
+        limit = len(docs) if limit is None else limit
+        if limit < 0:
+            raise ValueError("Limit must be non-negative")
+        cacheable = True  # Whether the query is cacheable
+        # Only cache cacheable queries
+
+        # First, we check if the query has a cache
+        cached_ids = None if cond is None else self._query_cache.get(cond)
+        if cached_ids is not None:
+            try:
+                docs = {_id: docs[_id] for _id in cached_ids}
+                cacheable = False  # No need to cache again
+            except KeyError:
+                # The cache is invalid, so we need to recompute it
+                cached_ids = None
+
+        # doc_ids sieve, if doc_ids are specified
+        if doc_ids is not None:
+            cacheable = False  # cache only based on cond
+            docs = {_id: docs[_id] for _id in doc_ids if _id in docs}
+
+        # cond sieve, if cond is specified, otherwise apply limit here
+        if cond is not None and cached_ids is None:
+            # Also apply limit here since cond() might be expensive
+            docs = {
+                _id: doc for _id, doc in docs.items()
+                if cond(doc) and (limit := limit - 1) >= 0
+            }
+            # Note also that by default we expect custom query objects to be
+            # cacheable (which means they need to have a stable hash value).
+            # This is to keep consistency with TinyDB's behavior before
+            # `is_cacheable` was introduced which assumed that all queries
+            # are cacheable.
+            cacheable = cacheable and getattr(cond, "is_cacheable", lambda: True)()
+        # limit sieve
+        elif limit < len(docs):
+            docs = {_id: docs[_id] for _id in docs if (limit := limit - 1) >= 0}
+
+        cacheable = cacheable and limit >= 0  # If the limit is not reached
+
+        if cacheable:
+            if TYPE_CHECKING:  # Make stupid mypy happy
+                assert cond is not None  # skipcq: BAN-B101
+            # Update the query cache
+            self._query_cache[cond] = tuple(docs.keys())
+
+        # deepcopy if isolation level is >= 2
+        # otherwise return shallow copy in case of no sieve been applied
+        return deepcopy(docs) if self._isolevel >= 2 else docs.copy()
 
     async def _read_table(self) -> dict[IDVar, DocVar]:
         """
@@ -870,12 +872,12 @@ class Table(Generic[IDVar, DocVar]):
                 id_cls(doc_id): doc_cls(rdoc, doc_id=id_cls(doc_id))
                 for doc_id, rdoc in raw.items()
             }
+            if not self.no_dbcache:
+                # Caching if no_dbcache is not set
+                self._cache = cooked
+
         await self._run_with_iso(cook)
-        if self.no_dbcache:
-            # No caching
-            return cooked
-        self._cache = cooked
-        return self._cache
+        return self._cache or cooked
 
     async def _read_raw_table(self) -> MutableMapping[Any, Mapping]:
         """
@@ -894,7 +896,7 @@ class Table(Generic[IDVar, DocVar]):
             return {}
 
         # Retrieve the current table's data
-        return tables.pop(self.name, {})
+        return tables.get(self.name, {})
 
     async def _update_table(self, updater: Callable[[dict[IDVar, DocVar]], None]):
         """
@@ -921,12 +923,13 @@ class Table(Generic[IDVar, DocVar]):
         try:
             # Write the newly updated data back to the storage
             await self._storage.write(tables)
-        except Exception as e:
+        except Exception:
+            # Writing failure, data cache is out of sync
             self.clear_data_cache()
-            raise e
-
-        # Clear the query cache, as the table contents have changed
-        self.clear_cache()
+            raise
+        finally:
+            # Clear the query cache, as the table contents have changed
+            self.clear_cache()
 
     async def _run_with_iso(self, func: Callable[ARGS, V],
                             *args: ARGS.args, **kwargs: ARGS.kwargs) -> V:

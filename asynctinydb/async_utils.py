@@ -62,7 +62,7 @@ def sync_await(fut: Awaitable[V],
     syncfuture = SyncFuture[V]()
 
     def callsoon():
-        """add_call_back is not thread-safe"""
+        """workaround for thread safety"""
         def callback(future: Future):
             try:
                 syncfuture.set_result(future.result())
@@ -75,7 +75,7 @@ def sync_await(fut: Awaitable[V],
             return await fut
         try:
             loop.create_task(wrap()).add_done_callback(callback)
-        except BaseException as e:
+        except BaseException as e:  # pragma: no cover # Hard to test
             syncfuture.set_exception(e)
 
     loop.call_soon_threadsafe(callsoon)
@@ -369,11 +369,13 @@ class AsinkRunner:
                     let_future(fut, fut.set_result, ret)
                 finally:
                     self._task_done()
+        except BaseException:
+            # Make sure the failed future is cancelled last
+            self._put_nowait(1, None, fut)
+            raise
         finally:
             self._closed = True
             with self._lock:
-                self._put_nowait(0, None, fut)
-                exc = None
                 while True:
                     try:
                         _, _, fut = self._queue.get_nowait()
@@ -381,10 +383,8 @@ class AsinkRunner:
                         self._task_done()
                     except Empty:
                         break
-                    except BaseException as e:
-                        exc = e  # Will use ExceptionGroup in the future
-                if exc is not None:  # pragma: no branch
-                    raise exc
+                    except BaseException:
+                        pass
 
     def to_async(self, func: Callable[ARGS, T]) -> Callable[ARGS, Awaitable[T]]:
         """

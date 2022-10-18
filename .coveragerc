@@ -10,7 +10,7 @@ exclude_lines =
     def main()
     if __name__ == .__main__.:
     if TYPE_CHECKING:
-    except ImportError:
+    except ImportError
     @overload
     @abstractmethod
 

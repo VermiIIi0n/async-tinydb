@@ -7,8 +7,8 @@ import io
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar
 import os
-import ujson as json
 from tempfile import NamedTemporaryFile
+import ujson as json
 from .event_hooks import EventHook, ActionChain, EventHint, ActionCentipede
 from .event_hooks import AsyncActionType
 from .utils import AsinkRunner
@@ -139,7 +139,7 @@ class JSONStorage(Storage):
 
         # Initialize event hooks
 
-        def sentinel(event: str, storage: Storage, data: str | bytes):
+        def sentinel(_: str, storage: Storage, data: str | bytes):
             prev_ret = data
 
             def preprocess(data: str | bytes | None):

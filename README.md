@@ -14,7 +14,7 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **Asynchronous**: Say goodbye to blocking IO. **Don't forget to `await` async methods**!
 
-* **Drop support**: Only supports Python 3.10+.  (for 3.8+ go to this [branch](https://github.com/VermiIIi0n/async-tinydb/tree/legacy))
+* **Drop support**: Only supports Python 3.10+.
 
 * **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`[^1]
 
@@ -35,6 +35,8 @@ I will try to keep up with the latest version of `TinyDB`.
 * **Isolation Level**: Performance or ACID? It's up to you[^isolevel].
 
 * **Atomic Write**: **A**CID!
+
+* **Batch search by IDs**: `search` method now takes an extra `doc_ids` argument (works like an additional condition)
 
 # How to use it?
 
@@ -258,9 +260,13 @@ Make sure you have implemented all the methods required by  `BaseDocument` class
 
 # Misc
 
-* **Lazy-load:** File loading & dirs creating are delayed to the first IO operation.
-* **`CachingMiddleWare`**: `WRITE_CACHE_SIZE` is now instance-specific.  
+* Lazy-load: File loading & dirs creating are delayed to the first IO operation.
+* `CachingMiddleWare`: `WRITE_CACHE_SIZE` is now instance-specific.  
   Example: `TinyDB("test.db", storage=CachingMiddleWare(JSONStorage, 1024))`
+* `search` accepts optional `cond`, returns all docs if no arguments are provided
+* `get` and `contains` raises `ValueError` instead of `RuntimeError` when `cond` and `doc_id` are both `None`
+* `LRUCache` stores `tuple`s of ids instead of `list`s of docs
+* `search` and `get` treat `doc_id` and `doc_ids` as extra conditions instead of ignoring conditions when they are provided. That is to say, when `cond` and `doc_id(s)` are passed, they return docs satisfies both conditions.
 
 
 

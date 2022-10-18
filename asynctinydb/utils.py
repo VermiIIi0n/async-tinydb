@@ -310,10 +310,7 @@ class StrChain(Sequence[str]):
 
     def __eq__(self, other) -> bool:
         if isinstance(other, StrChain):
-            return self._list == other._list \
-                and self._joint == other._joint \
-                and self._callback == other._callback \
-                and self._kw == other._kw
+            return self._list == other._list and self._joint == other._joint
         return False
 
     def __hash__(self: S) -> int:

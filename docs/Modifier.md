@@ -132,8 +132,6 @@ This subclass contains methods to convert the data to a different format.
 
 This method allows JSONStorage to store more data types.
 
-Most of the data types are compatible with MongoDB.
-
 ### Extended Types
 * `uuid.UUID`
 * `datetime.datetime`: Converted to `ISO 8601` format.
@@ -184,4 +182,4 @@ marker_hooks = {
 The first argument is the data to be converted.  
 The second argument is the reverse converter function, useful when you are dealing with `Container` types.
 
-In this example, we convert the `$int` marker back to an `int` (i.e. `{"$int":"42"}` -> `42`).
+In this example, we convert `dict` with the `$int` marker back to an `int` (i.e. `{"$int":"42"}` -> `42`).

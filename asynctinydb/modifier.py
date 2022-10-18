@@ -41,10 +41,10 @@ class Modifier:
             try:
                 from Crypto.Cipher import AES
                 from Crypto.Cipher._mode_gcm import GcmMode
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "Dependencies not satisfied: "
-                    "pip install async-tinydb[encryption]")
+                    "pip install async-tinydb[encryption]") from e
 
             s = _get_storage(s)
 
@@ -54,7 +54,7 @@ class Modifier:
             dtype: type = bytes
 
             @s.on.write.post
-            async def encrypt_aes_gcm(ev: str, s: Storage, data: str | bytes):
+            async def encrypt_aes_gcm(_: str, s: Storage, data: str | bytes):
                 nonlocal dtype
                 cipher: GcmMode = AES.new(key, **kw)  # type: ignore
                 if isinstance(data, str):
@@ -68,7 +68,7 @@ class Modifier:
                 return data
 
             @s.on.read.pre
-            async def decrypt_aes_gcm(ev: str, s: Storage, data: bytes):
+            async def decrypt_aes_gcm(_: str, s: Storage, data: bytes):
                 d_len = data[0]  # digest length
                 digest = data[1: d_len + 1]
                 cipher: GcmMode = AES.new(
@@ -126,10 +126,10 @@ class Modifier:
 
             try:
                 import brotli
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "Dependencies not satisfied: "
-                    "pip install async-tinydb[compression]")
+                    "pip install async-tinydb[compression]") from e
 
             s = _get_storage(s)
             kw["quality"] = quality
@@ -165,17 +165,17 @@ class Modifier:
 
             try:
                 import blosc2
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "Dependencies not satisfied: "
-                    "pip install async-tinydb[compression]")
+                    "pip install async-tinydb[compression]") from e
 
             s = _get_storage(s)
             kw["clevel"] = clevel
             dtype: type = bytes
 
             @s.on.write.post
-            async def compress_blosc2(ev: str, s: Storage, data: str | bytes):
+            async def compress_blosc2(_: str, s: Storage, data: str | bytes):
                 nonlocal dtype
                 if isinstance(data, str):
                     dtype = str
@@ -183,7 +183,7 @@ class Modifier:
                 return await async_run(blosc2.compress, data, **kw)
 
             @s.on.read.pre
-            async def decompress_blosc2(ev: str, s: Storage, data: bytes):
+            async def decompress_blosc2(_: str, s: Storage, data: bytes):
                 task = async_run(blosc2.decompress, data)
                 if dtype is bytes:
                     return await task
@@ -343,11 +343,11 @@ class Modifier:
                 return obj
 
             @s.on.write.pre
-            async def convert_exjson(ev: str, s: Storage, data: dict):
+            async def convert_exjson(_: str, s: Storage, data: dict):
                 return await async_run(convert, data)
 
             @s.on.read.post
-            async def recover_exjson(ev: str, s: Storage, data: dict):
+            async def recover_exjson(_: str, s: Storage, data: dict):
                 return await async_run(recover, data)
 
             return s

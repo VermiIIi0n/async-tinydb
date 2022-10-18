@@ -356,7 +356,16 @@ async def test_search(db: TinyDB):
 
 
 async def test_search_with_doc_ids(db: TinyDB):
-    ...
+    assert len(await db.search(where('int') == 1, doc_ids=[1, 2])) == 2
+    assert len(await db.search(where('int') == 1, doc_ids=[1, 2, 3])) == 3
+    assert len(await db.search(where('int') == 0, doc_ids=[1, 2, 3])) == 0
+    assert len(await db.search(where('int') == 1, doc_ids=[])) == 0
+    assert len(await db.search(where('int') == 1, doc_ids=None)) == 3
+    assert len(await db.search(doc_ids=[1, 2, 3])) == 3
+    assert len(await db.search(limit=2, doc_ids=[1, 2, 3])) == 2
+    assert len(await db.search()) == 3
+    with pytest.raises(ValueError, match=r"must be non-negative"):
+        await db.search(limit=-2, doc_ids=[1, 2, 3])
 
 
 async def test_search_path(db: TinyDB):
@@ -385,8 +394,15 @@ async def test_get_ids(db: TinyDB):
     assert await db.get(doc_id=float('NaN')) is None  # type: ignore
 
 
+async def test_combined_get(db: TinyDB):
+    el = (await db.all())[2]
+    assert await db.get(where("int") == '0', doc_id=el.doc_id) is None
+    assert await db.get(where("int") == 1, doc_id=el.doc_id) == el
+    assert await db.get(where("int") == 1, doc_id=IncreID(-1)) is None
+
+
 async def test_get_invalid(db: TinyDB):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         await db.get()
 
 
@@ -407,7 +423,7 @@ async def test_contains_ids(db: TinyDB):
 
 
 async def test_contains_invalid(db: TinyDB):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         await db.contains()
 
 
@@ -634,15 +650,31 @@ async def test_query_cache():
     results = await db.search(query)
     assert len(results) == 1
 
+    assert len(db._query_cache) == 1
+    db.clear_cache()
+    assert len(db._query_cache) == 0
+    await db.search(None, limit=1)
+    # When limit is less than the number of results, the query is not cached
+    assert len(db._query_cache) == 0
+    await db.search(doc_ids=[1, 2, 3])
+    assert len(db._query_cache) == 0  # When doc_ids specified, no cache
+    await db.search(where("value").exists(), limit=2)
+    assert len(db._query_cache) == 1
+    assert len(await db.search(where("value").exists(), limit=2)) == 2
+    assert len(await db.search(where("value").exists(), limit=1)) == 1
+    assert len(await db.search(where("value").exists(), limit=0)) == 0
+    await db.search(query)
+    assert len(db._query_cache) == 2
+
     # Modify the db instance to not return any results when
     # bypassing the query cache
     async def f():
         return {}
+    # Force cache to be invalidated
     db._tables[db.table(db.default_table_name).name]._read_table = f
 
-    # Make sure we got an independent copy of the result list
-    results.extend([1])
-    assert await db.search(query) == [{'name': 'foo', 'value': 42}]
+    assert db._query_cache.get(query)
+    assert [] == await db.search(query)
     await db.close()
 
 
