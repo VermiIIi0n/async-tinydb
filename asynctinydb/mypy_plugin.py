@@ -16,7 +16,7 @@ class TinyDBPlugin(Plugin):
         self.named_placeholders: Dict[str, str] = {}
 
     def get_dynamic_class_hook(self, fullname: str) -> CB[DynamicClassDef]:
-        if fullname == 'asynctinydb.utils.with_typehint':
+        if fullname == "asynctinydb.utils.with_typehint":
             def hook(ctx: DynamicClassDefContext):
                 klass = ctx.call.args[0]
                 assert isinstance(klass, NameExpr)

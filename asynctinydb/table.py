@@ -5,12 +5,15 @@ data in TinyDB.
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from contextlib import suppress
 import uuid
+import json  # For pretty printing
 from copy import deepcopy
-from typing import TYPE_CHECKING, AsyncGenerator, Collection, MutableMapping
+from typing import AsyncGenerator, Collection, MutableMapping
 from typing import overload, Callable, Iterable
 from typing import Mapping, Generic, cast, TypeVar, Type, Any, ParamSpec
-from .queries import QueryLike
+from .queries import QueryLike, is_cacheable
+from .event_hooks import EventHook, EventHint, ActionChain
 from .storages import Storage
 from .utils import LRUCache, sync_await, AsinkRunner
 from .utils import async_run
@@ -170,6 +173,10 @@ class Document(dict, BaseDocument[IDVar]):
     def doc_id(self, value: IDVar):
         self._doc_id = value
 
+    def __repr__(self):
+        pp = json.dumps(self, indent=2, ensure_ascii=False, default=str)
+        return f"Document(\n  doc_id={self.doc_id} \n  doc={pp})"
+
 
 class Table(Generic[IDVar, DocVar]):
     """
@@ -257,6 +264,15 @@ class Table(Generic[IDVar, DocVar]):
         self._sink = AsinkRunner()
         """Serialise all operations on this table."""
 
+        self._event_hook = EventHook()
+        """Hook for events."""
+        self._event_hook.hook("create", ActionChain())
+        self._event_hook.hook("read", ActionChain())
+        self._event_hook.hook("update", ActionChain())
+        self._event_hook.hook("delete", ActionChain())
+        self._event_hook.hook("truncate", ActionChain())
+        self._on = TableHints(self._event_hook)
+
     def __repr__(self):
         args = [
             f"name='{self.name}'",
@@ -279,6 +295,18 @@ class Table(Generic[IDVar, DocVar]):
         Get the table storage instance.
         """
         return self._storage
+
+    @property
+    def event_hook(self) -> EventHook:
+        """
+        Get the event hook instance.
+        """
+        return self._event_hook
+
+    @property
+    def on(self) -> TableHints:
+        """On event"""
+        return self._on
 
     async def insert(self, document: Mapping) -> IDVar:
         """
@@ -317,8 +345,9 @@ class Table(Generic[IDVar, DocVar]):
             # If isolevel is higher than 2, deep copy the document
             if self._isolevel >= 2:
                 document = deepcopy(document)
-
-            table[doc_id] = self.document_class(document, doc_id)
+            doc = self.document_class(document, doc_id)
+            self.event_hook.emit("create", self, doc)
+            table[doc_id] = doc
 
         # See below for details on ``Table._update``
         await self._update_table(updater)
@@ -358,16 +387,15 @@ class Table(Generic[IDVar, DocVar]):
                     # later. Then save the document with its doc_id and
                     # skip the rest of the current loop
                     doc_id = self.document_id_class(document.doc_id)
-                    doc_ids.append(doc_id)
-                    table[doc_id] = self.document_class(document, doc_id)
-                    continue
-
-                # Generate new document ID for this document
-                # Store the doc_id, so we can return all document IDs
-                # later, then save the document with the new doc_id
-                doc_id = self._get_next_id(existing_keys)
+                else:
+                    # Generate new document ID for this document
+                    # Store the doc_id, so we can return all document IDs
+                    # later, then save the document with the new doc_id
+                    doc_id = self._get_next_id(existing_keys)
                 doc_ids.append(doc_id)
-                table[doc_id] = self.document_class(document, doc_id)
+                new_doc = self.document_class(document, doc_id)
+                self.event_hook.emit("create", self, new_doc)
+                table[doc_id] = new_doc
 
         # See below for details on ``Table._update``
         await self._update_table(updater)
@@ -394,7 +422,7 @@ class Table(Generic[IDVar, DocVar]):
             limit: int = None,
             doc_ids: Iterable[IDVar] = None) -> list[DocVar]:
         """
-        Search for all documents matching a 'where' cond,
+        Search for all documents matching a "where" cond,
         whilst they ids are in `doc_ids`(if specified).
 
         * `cond`: the condition to check against
@@ -471,76 +499,30 @@ class Table(Generic[IDVar, DocVar]):
             def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
                 # Update documents by calling the update function provided by
                 # the user
-                if TYPE_CHECKING:
-                    assert callable(fields)  # skipcq: BAN-B101
-                fields(table[doc_id])
+                fields(table[doc_id])  # type: ignore
         else:
             def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
                 nonlocal fields
-                if TYPE_CHECKING:
-                    assert isinstance(fields, dict)  # skipcq: BAN-B101
                 if self._isolevel >= 2:
                     fields = deepcopy(fields)
                 # Update documents by setting all fields from the provided data
-                table[doc_id].update(fields)
+                table[doc_id].update(fields)  # type: ignore
 
-        if doc_ids is not None:
-            # Perform the update operation for documents specified by a list
-            # of document IDs
-
-            updated_ids = list(doc_ids)
-
-            def updater_by_ids(table: dict[IDVar, DocVar]):
-                # Call the processing callback with all document IDs
-                for doc_id in updated_ids:
-                    perform_update(table, doc_id)
-
-            # Perform the update operation (see _update_table for details)
-            await self._update_table(updater_by_ids)
-
-            return updated_ids
-
-        if cond is not None:
-            # Perform the update operation for documents specified by a query
-
-            # Collect affected doc_ids
-            updated_ids = []
-
-            def updater_by_cond(table: dict[IDVar, DocVar]):
-                _cond = cast(QueryLike, cond)
-
-                # We need to convert the keys iterator to a list because
-                # we may remove entries from the ``table`` dict during
-                # iteration and doing this without the list conversion would
-                # result in an exception (RuntimeError: dictionary changed size
-                # during iteration)
-                for doc_id in list(table.keys()):
-                    # Pass through all documents to find documents matching the
-                    # query. Call the processing callback with the document ID
-                    if _cond(table[doc_id]):
-                        # Add ID to list of updated documents
-                        updated_ids.append(doc_id)
-
-                        # Perform the update (see above)
-                        perform_update(table, doc_id)
-
-            # Perform the update operation (see _update_table for details)
-            await self._update_table(updater_by_cond)
-
-            return updated_ids
-
-        # Update all documents unconditionally
+        docs = await self.search(cond, doc_ids=doc_ids)
+        ids = [doc.doc_id for doc in docs]
 
         updated_ids = []
 
         def updater(table: dict[IDVar, DocVar]):
             # Process all documents
-            for doc_id in list(table.keys()):
+            for doc_id in ids:
                 # Add ID to list of updated documents
                 updated_ids.append(doc_id)
 
                 # Perform the update (see above)
                 perform_update(table, doc_id)
+
+                self.event_hook.emit("update", self, table[doc_id])
 
         # Perform the update operation (see _update_table for details)
         await self._update_table(updater)
@@ -586,16 +568,17 @@ class Table(Generic[IDVar, DocVar]):
             # during iteration)
             for doc_id in list(table.keys()):
                 for fields, cond in updates:
-                    _cond = cond
 
                     # Pass through all documents to find documents matching the
                     # query. Call the processing callback with the document ID
-                    if _cond(table[doc_id]):
+                    if cond(table[doc_id]):
                         # Add ID to list of updated documents
                         updated_ids.append(doc_id)
 
                         # Perform the update (see above)
                         perform_update(fields, table, doc_id)
+
+                        self.event_hook.emit("update", self, table[doc_id])
 
         # Perform the update operation (see _update_table for details)
         await self._update_table(updater)
@@ -631,7 +614,7 @@ class Table(Generic[IDVar, DocVar]):
         # Perform the update operation
         try:
             updated_docs = await self.update(document, cond, doc_ids)
-        except KeyError:
+        except KeyError:  # pragma: no cover # Hard to test
             # This happens when a doc_id is specified, but it's missing
             updated_docs = None
 
@@ -655,56 +638,24 @@ class Table(Generic[IDVar, DocVar]):
         :param doc_ids: a list of document IDs
         :returns: a list containing the removed documents' ID
         """
-        if doc_ids is not None:
-            # This function returns the list of IDs for the documents that have
-            # been removed. When removing documents identified by a set of
-            # document IDs, it's this list of document IDs we need to return
-            # later.
-            # We convert the document ID iterator into a list, so we can both
-            # use the document IDs to remove the specified documents and
-            # to return the list of affected document IDs
-            removed_ids = list(doc_ids)
 
-            def updater(table: dict[IDVar, DocVar]):
-                for doc_id in removed_ids:
-                    table.pop(doc_id)
+        if cond is None and doc_ids is None:
+            raise RuntimeError('Use truncate() to remove all documents')
 
-            # Perform the remove operation
-            await self._update_table(updater)
+        docs = await self.search(cond, doc_ids=doc_ids)
+        ids = [doc.doc_id for doc in docs]
 
-            return removed_ids
+        def rm_updater(table: dict[IDVar, DocVar]):
+            for doc_id in ids:
+                # Other threads may have already removed the document
+                with suppress(KeyError):
+                    doc = table.pop(doc_id)
+                    self.event_hook.emit("delete", self, doc)
 
-        if cond is not None:
-            removed_ids = []
+        # Perform the remove operation
+        await self._update_table(rm_updater)
 
-            # This updater function will be called with the table data
-            # as its first argument. See ``Table._update`` for details on this
-            # operation
-            def rm_updater(table: dict[IDVar, DocVar]):
-                # We need to convince MyPy (the static type checker) that
-                # the ``cond is not None`` invariant still holds true when
-                # the updater function is called
-                _cond = cast(QueryLike, cond)
-
-                # We need to convert the keys iterator to a list because
-                # we may remove entries from the ``table`` dict during
-                # iteration and doing this without the list conversion would
-                # result in an exception (RuntimeError: dictionary changed size
-                # during iteration)
-                for doc_id in list(table.keys()):
-                    if _cond(table[doc_id]):
-                        # Add document ID to list of removed document IDs
-                        removed_ids.append(doc_id)
-
-                        # Remove document from the table
-                        table.pop(doc_id)
-
-            # Perform the remove operation
-            await self._update_table(rm_updater)
-
-            return removed_ids
-
-        raise RuntimeError('Use truncate() to remove all documents')
+        return ids
 
     async def truncate(self) -> None:
         """
@@ -714,8 +665,11 @@ class Table(Generic[IDVar, DocVar]):
         # Update the table by resetting all data
         await self._update_table(lambda table: table.clear())
 
-        # Reset document ID counter
+        # Reset document ID cache
         self.document_id_class.clear_cache(self)
+
+        # Trigger event
+        self.event_hook.emit("truncate", self)
 
     async def count(self, cond: QueryLike) -> int:
         """
@@ -746,7 +700,7 @@ class Table(Generic[IDVar, DocVar]):
 
         # Put function in execution queue and run with a higher priority
         # This is to ensure thread safety
-        self._sink.sync_run_as(2, self._query_cache.clear).result()
+        self._sink.sync_run_as(16, self._query_cache.clear).result()
 
     def clear_data_cache(self):
         """
@@ -758,7 +712,7 @@ class Table(Generic[IDVar, DocVar]):
         def updater():
             self._cache = None
         # Put function in execution queue and run with a higher priority
-        self._sink.sync_run_as(2, updater).result()
+        self._sink.sync_run_as(16, updater).result()
 
     def __len__(self):
         """
@@ -779,9 +733,9 @@ class Table(Generic[IDVar, DocVar]):
             for doc_id, doc in (await self._read_table()).items():
                 # Convert documents to the document class
                 if self._isolevel >= 2:
-                    yield deepcopy(doc)
-                else:
-                    yield self.document_class(doc, doc_id)
+                    doc = deepcopy(doc)
+                self.event_hook.emit("read", self, doc)
+                yield self.document_class(doc, doc_id)
         return iterator()
 
     def _get_next_id(self, keys: Collection[IDVar]) -> IDVar:
@@ -804,11 +758,12 @@ class Table(Generic[IDVar, DocVar]):
         limit = len(docs) if limit is None else limit
         if limit < 0:
             raise ValueError("Limit must be non-negative")
-        cacheable = True  # Whether the query is cacheable
-        # Only cache cacheable queries
+        cacheable = cond is not None and is_cacheable(cond)
+        cond = cast(QueryLike, cond)
+        # Only cache cacheable queries, this value may alter.
 
         # First, we check if the query has a cache
-        cached_ids = None if cond is None else self._query_cache.get(cond)
+        cached_ids = self._query_cache.get(cond) if cacheable else None
         if cached_ids is not None:
             try:
                 docs = {_id: docs[_id] for _id in cached_ids}
@@ -823,7 +778,7 @@ class Table(Generic[IDVar, DocVar]):
             docs = {_id: docs[_id] for _id in doc_ids if _id in docs}
 
         # cond sieve, if cond is specified, otherwise apply limit here
-        if cond is not None and cached_ids is None:
+        if cond is not None and cached_ids is None:  # type: ignore[redundant-expr]
             # Also apply limit here since cond() might be expensive
             docs = {
                 _id: doc for _id, doc in docs.items()
@@ -834,7 +789,7 @@ class Table(Generic[IDVar, DocVar]):
             # This is to keep consistency with TinyDB's behavior before
             # `is_cacheable` was introduced which assumed that all queries
             # are cacheable.
-            cacheable = cacheable and getattr(cond, "is_cacheable", lambda: True)()
+            cacheable = cacheable and is_cacheable(cond)
         # limit sieve
         elif limit < len(docs):
             docs = {_id: docs[_id] for _id in docs if (limit := limit - 1) >= 0}
@@ -842,9 +797,13 @@ class Table(Generic[IDVar, DocVar]):
         cacheable = cacheable and limit >= 0  # If the limit is not reached
 
         if cacheable:
-            cond = cast(QueryLike, cond)
             # Update the query cache
             self._query_cache[cond] = tuple(docs.keys())
+
+        # Trigger event
+        if self.event_hook["read"]:
+            for doc in docs.values():
+                self.event_hook.emit("read", self, doc)
 
         # deepcopy if isolation level is >= 2
         # otherwise return shallow copy in case of no sieve been applied
@@ -923,7 +882,7 @@ class Table(Generic[IDVar, DocVar]):
         try:
             # Write the newly updated data back to the storage
             await self._storage.write(tables)
-        except Exception:
+        except BaseException:
             # Writing failure, data cache is out of sync
             self.clear_data_cache()
             raise
@@ -937,3 +896,30 @@ class Table(Generic[IDVar, DocVar]):
         if self._isolevel:
             return await self._sink.run(func, *args, **kwargs)
         return await async_run(func, *args, **kwargs)
+
+
+###### Event Hints ######
+C = TypeVar('C', bound=Callable[[str, Table, BaseDocument], None])
+C1 = TypeVar('C1', bound=Callable[[str, Table], None])
+
+
+class TableHints(EventHint):
+    @property
+    def create(self) -> Callable[[C], C]:
+        return self._chain.create
+
+    @property
+    def read(self) -> Callable[[C], C]:
+        return self._chain.read
+
+    @property
+    def update(self) -> Callable[[C], C]:
+        return self._chain.update
+
+    @property
+    def delete(self) -> Callable[[C], C]:
+        return self._chain.delete
+
+    @property
+    def truncate(self) -> Callable[[C1], C1]:
+        return self._chain.truncate

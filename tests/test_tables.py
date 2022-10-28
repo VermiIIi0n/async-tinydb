@@ -1,9 +1,11 @@
 import re
 
 import pytest
-
-from asynctinydb import where
+import datetime as dt
+from asynctinydb import where, Modifier
+from asynctinydb.event_hooks import EventHook
 from asynctinydb.database import TinyDB
+from asynctinydb.storages import MemoryStorage
 from asynctinydb.table import UUID, Document
 
 
@@ -83,9 +85,9 @@ async def test_query_cache_with_mutable_callable(db: TinyDB):
     mutable = 5
     def increase(x): return x + mutable
 
-    assert where('val').is_cacheable()
-    assert not where('val').map(increase).is_cacheable()
-    assert not (where('val').map(increase) == 10).is_cacheable()
+    assert where('val').cacheable
+    assert not where('val').map(increase).cacheable
+    assert not (where('val').map(increase) == 10).cacheable
 
     search = where('val').map(increase) == 10
     assert await table.count(search) == 1
@@ -186,6 +188,7 @@ async def test_uuid(db: TinyDB):
     doc = Document({"answer": 42}, doc_id=UUID("00000000-0000-0000-0000-000000000000"))
     await table.insert(doc)
     assert isinstance(doc.doc_id, UUID)
+    str(doc)
 
     assert len(await table.all()) == 3
     assert await table.get(doc_id=UUID("00000000-0000-0000-0000-000000000000")) == doc
@@ -201,3 +204,109 @@ async def test_table_close(db: TinyDB):
     table = db.table("table1")
     await table.close()
     await table.close()  # Should not raise
+
+
+async def test_table_event_hook(db: TinyDB):
+    tab = db.table("table_ev")
+
+    doc = {
+        "name": "foo",
+        "age": 42,
+    }
+
+    test_doc = None
+
+    @tab.on.create
+    def on_create(ev, tab, doc):
+        nonlocal test_doc
+        test_doc = doc.copy()
+    
+    await tab.insert(doc)
+    assert test_doc == doc
+
+    @tab.on.read
+    def on_read(ev, tab, doc):
+        nonlocal test_doc
+        test_doc["read"] = True
+    
+    await tab.all()
+    assert test_doc["read"]
+
+    @tab.on.update
+    def on_update(ev, tab, doc):
+        nonlocal test_doc
+        test_doc = doc.copy()
+    
+    await tab.update({"sex": "futa"}, doc_ids=[1])
+    assert test_doc["sex"] == "futa"
+
+    @tab.on.delete
+    def on_delete(ev, tab, doc):
+        nonlocal test_doc
+        test_doc = {}
+    
+    await tab.remove(doc_ids=[1])
+    assert test_doc == {}
+
+    @tab.on.truncate
+    def on_truncate(ev, tab):
+        nonlocal test_doc
+        test_doc = {"truncated": True}
+    
+    await tab.truncate()
+    assert test_doc["truncated"]
+
+
+async def test_timestamp(db: TinyDB):
+    table = db.table("timestamp")
+    for i in range(8):
+        create = i & 0x1
+        modify = i & 0x2
+        access = i & 0x4
+        Modifier.Conversion.Timestamp(table,
+            create=create, modify=modify, access=access)
+        
+        doc_id = await table.insert({"foo": "bar"})
+        doc2 = await table.get(doc_id=doc_id)
+        if create:
+            assert isinstance(doc2["created"], str)
+        if access:
+            assert isinstance(doc2["accessed"], str)
+        
+        await table.update({"foo": "baz"}, doc_ids=[doc_id])
+        doc2 = await table.get(doc_id=doc_id)
+        if modify:
+            assert isinstance(doc2["modified"], str)
+        
+        table.event_hook.clear_actions()
+    
+    await table.truncate()
+
+    # Test datetime instance
+    event_hook = EventHook(db.storage.event_hook)
+    if not isinstance(db.storage, MemoryStorage):
+        Modifier.Conversion.ExtendedJSON(db)
+    for i in range(8):
+        create = i & 0x1
+        modify = i & 0x2
+        access = i & 0x4
+        Modifier.Conversion.Timestamp(table, fmt=None,
+            create=create, modify=modify, access=access)
+        doc_id = await table.insert({"foo": "bar"})
+        doc2 = await table.get(doc_id=doc_id)
+
+        if create:
+            assert isinstance(doc2["created"], dt.datetime)
+
+        if access:
+            assert isinstance(doc2["accessed"], dt.datetime)
+        
+        await table.update({"foo": "baz"}, doc_ids=[doc_id])
+        doc2 = await table.get(doc_id=doc_id)
+        if modify:
+            assert isinstance(doc2["modified"], dt.datetime)
+        
+        table.event_hook.clear_actions()
+    
+    await table.truncate()
+    db.storage._event_hook = event_hook

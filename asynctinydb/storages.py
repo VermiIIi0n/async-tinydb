@@ -167,10 +167,8 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
         _chain = ActionCentipede[AsyncActionType]
         self.event_hook.hook("write.pre", _chain(sentinel=sentinel))
         self.event_hook.hook("write.post", _chain(sentinel=sentinel))
-        self.event_hook.hook("read.pre", _chain(
-            reverse=True, sentinel=sentinel))
-        self.event_hook.hook("read.post", _chain(
-            reverse=True, sentinel=sentinel))
+        self.event_hook.hook("read.pre", _chain(reverse=True, sentinel=sentinel))
+        self.event_hook.hook("read.post", _chain(reverse=True, sentinel=sentinel))
         self.event_hook.hook("close", ActionChain[AsyncActionType]())
         self._on = StorageWriteReadPrePostHint(self._event_hook)
 
@@ -189,13 +187,8 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
         """Read data from the storage."""
         await self._prep()
 
-        def _atomic_read():
-            """Read data from the file."""
-            with open(self._path, mode=self._mode, encoding=self._encoding) as f:
-                return f.read()
-
         # Load the JSON contents of the file
-        raw: str | bytes = await self._sink.run(_atomic_read)
+        raw: str | bytes = await self._sink.run(self._atomic_read)
 
         if not raw:
             return None
@@ -250,6 +243,11 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
         if any(character in self._mode for character in ('+', 'w', 'a')):
             await self._sink.run(touch, self._path, create_dirs=self._create_dirs)
 
+    def _atomic_read(self):
+        """Read data from the file."""
+        with open(self._path, mode=self._mode, encoding=self._encoding) as f:
+            return f.read()
+
     def _atomic_write(self, data):
         # Open the temp file
         with NamedTemporaryFile(mode=self._mode, encoding=self._encoding,
@@ -297,7 +295,7 @@ class EncryptedJSONStorage(JSONStorage):
     """
 
     def __init__(self, path: str, key: str | bytes | None = None,
-                 create_dirs=False, encoding=None, access_mode='rb+',
+                 create_dirs=False, encoding=None, access_mode="rb+",
                  encryption=None, encrypt_extra: dict = None,
                  compression=None, compress_extra: dict = None, **kwargs):
         """
@@ -335,7 +333,7 @@ class EncryptedJSONStorage(JSONStorage):
 
 class MemoryStorage(Storage):
     """
-    Store the data as JSON in memory.
+    Store the data in memory.
     """
 
     def __init__(self):
@@ -359,9 +357,9 @@ class MemoryStorage(Storage):
 
 ############# Event Hints #############
 
-_D = TypeVar('_D', bound=Callable[[str, Storage, dict[str, dict]], Awaitable])
-_S = TypeVar('_S', bound=Callable[[str, Storage, Any], Awaitable])
-_C = TypeVar('_C', bound=Callable[[str, Storage], Awaitable[None]])
+_D = TypeVar("_D", bound=Callable[[str, Storage, dict[str, dict]], Awaitable])
+_S = TypeVar("_S", bound=Callable[[str, Storage, Any], Awaitable])
+_C = TypeVar("_C", bound=Callable[[str, Storage], Awaitable[None]])
 
 
 class _write_hint(EventHint):

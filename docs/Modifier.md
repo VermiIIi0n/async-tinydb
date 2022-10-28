@@ -24,15 +24,13 @@ async def main():
 asyncio.run(main())
 
 ```
-That's it! 
+That's it!  
 After calling `Modifier.Encryption.AES_GCM`, the database will be encrypted.  
 **Applying modifiers at the beginning of the database instantiation is strongly recommended.**
 
 ## Order
 
-**The order matters when applying modifiers in some cases.**
-
-When the `BaseActionChain` of an event is `ActionCentipede`, the order becomes vital since the output of one modifier will be the input of the next modifier. ( See [event_hooks.py](../asynctinydb/event_hooks.py) and [storages.py](../asynctinydb/storages.py))
+**The order matters when applying modifiers in some cases[^1].**
 
 Look at this example:
 
@@ -58,7 +56,7 @@ What if you switch the order of layer 0 and 1? Layer 0 takes a `dict` and produc
 
 Not in this case! 
 
-Since `Conversion.ExtendedJSON` hooks into `write.pre` and `read.post` instead of `write.post` and `read.pre`, it doesn't interact with the other two layers.
+Since `Conversion.ExtendedJSON` hooks into `write.pre` and `read.post` instead of `write.post` and `read.pre`, it doesn't interact with the other two layers. You can find out which events the `Modifier`s hooked into in their description.
 
 # Subclasses
 
@@ -71,6 +69,7 @@ Similar methods are grouped into subclasses.
 This subclass contains methods to add encryption to the storage.
 ### `AES_GCM`
 
+* `type`: `StorageModifier`
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`
 * `output`: `bytes`
@@ -96,6 +95,7 @@ Modifier.Encryption.AES_GCM(db, "your key goes here")
 This subclass contains methods to add compression to the storage.
 ### `brotli`
 
+* `type`: `StorageModifier`
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`
 * `output`: `bytes`
@@ -110,6 +110,7 @@ Modifier.Compression.brotli(db)
 
 ###  `blosc2`
 
+* `type`: `StorageModifier`
 * `events`: `write.post`, `read.pre`
 * `input`: `str`|`bytes`
 * `output`: `bytes`
@@ -127,6 +128,7 @@ This subclass contains methods to convert the data to a different format.
 
 ### `ExtendedJSON`
 
+* `type`: `StorageModifier`
 * `events`: `write.pre`, `read.post`
 * `input`: `dict`
 * `output`: `dict`
@@ -138,7 +140,7 @@ This method allows JSONStorage to store more data types.
 * `uuid.UUID`
 * `datetime.datetime`: Converted to `ISO 8601` format.
 * `datetime.timestamp`
-* `bytes`: It is stored as a base64 string.
+* `bytes`: Stored as a base64 string.
 * `complex`
 * `set`
 * `frozenset`
@@ -163,6 +165,8 @@ type_hooks = {
     set: None
 }
 ```
+
+**This modifier will try to match the types precisely, if not found, it will use `isinstance()` to match classes, classes will be sorted by inheritance order(child first) before matching.**
 
 The first argument `x` is the data to be converted.  
 The second argument `c` is the converter function, useful when you are dealing with `Container` types.
@@ -217,3 +221,11 @@ async def main():
 asyncio.run(main())
 ```
 
+### `Timestamp`
+
+* `type`: `TableModifier`
+* `events`: `create`, `read`, `update`
+* `input`: `BaseDocument`
+* `output`: `None`
+
+[^1]: When the `BaseActionChain` of an event is `ActionCentipede`, the order becomes vital since the output of one modifier will be the input of the next modifier. ( See [event_hooks.py](../asynctinydb/event_hooks.py) and [storages.py](../asynctinydb/storages.py))

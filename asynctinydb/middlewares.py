@@ -51,7 +51,7 @@ class Middleware(Generic[S]):
 
         Using Middlewares, the user will call::
 
-                                       The 'real' storage class
+                                       The "real" storage class
                                        v
             TinyDB(storage=Middleware(StorageClass))
                        ^
@@ -81,7 +81,7 @@ class Middleware(Generic[S]):
         remain as transparent as possible.
         """
 
-        return getattr(self.__dict__['storage'], name)
+        return getattr(self.__dict__["storage"], name)
 
 
 class CachingMiddleware(Middleware[S]):

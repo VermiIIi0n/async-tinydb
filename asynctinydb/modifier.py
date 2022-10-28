@@ -1,14 +1,17 @@
 """Modifier class for TinyDB."""
 
 from __future__ import annotations
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, overload
+import datetime as dt
 from warnings import warn
 from functools import partial
 from .storages import Storage, StorageWithWriteReadPrePostHooks
-from .utils import async_run
+from .utils import async_run, FrozenDict, sort_class
 from .database import TinyDB
+from .table import Table, IncreID, Document, BaseDocument
 
 
+T = TypeVar("T", bound=Table)
 S = TypeVar('S', bound=Storage)
 SWRPH = TypeVar("SWRPH", bound=StorageWithWriteReadPrePostHooks)
 
@@ -17,6 +20,19 @@ def _get_storage(item: S | TinyDB[S]) -> S:
     """Get the storage from a TinyDB or Storage object."""
     if isinstance(item, TinyDB):
         return item.storage
+    return item
+
+
+@overload
+def _get_table(item: TinyDB) -> Table[IncreID, Document]: ...  # type: ignore[misc]
+@overload
+def _get_table(item: T) -> T: ...
+
+
+def _get_table(item):
+    """Get the table from a TinyDB or Table object."""
+    if isinstance(item, TinyDB):
+        return item.default_table
     return item
 
 
@@ -201,8 +217,7 @@ class Modifier:
         @staticmethod
         def ExtendedJSON(s: SWRPH | TinyDB[SWRPH],
                          type_hooks: dict[type, None | Callable[[
-                             Any, Callable[[Any], Any]],
-                             dict[str, Any]]] = None,
+                             Any, Callable[[Any], Any]], Any]] = None,
                          marker_hooks: dict[str, None | Callable[[
                              dict[str, Any], Callable[[Any], Any]],
                              Any]] = None) -> SWRPH:
@@ -258,23 +273,26 @@ class Modifier:
             s = _get_storage(s)
 
             _type_hooks = {
+                BaseDocument: lambda x, c: {k: c(v) for k, v in x.items()},
+                dict: lambda x, c: {k: c(v) for k, v in x.items()},
+                FrozenDict: lambda x, c: {k: c(v) for k, v in x.items()},
+                list: lambda x, c: [c(v) for v in x],
+                tuple: lambda x, c: {"$tuple": tuple(c(v) for v in x)},
+                set: lambda x, c: {"$set": tuple(c(v) for v in x)},
+                frozenset: lambda x, c: {"$frozenset": tuple(c(v) for v in x)},
                 uuid.UUID: lambda x, c: {"$uuid": str(x)},
                 datetime: lambda x, c: {"$date": x.isoformat()},
                 timedelta: lambda x, c: {"$timedelta": x.total_seconds()},
+                re.Pattern: lambda x, c: {"$regex": (x.pattern, x.flags)},
                 bytes: lambda x, c: {"$bytes": base64.b64encode(x).decode()},
                 complex: lambda x, c: {"$complex": (x.real, x.imag)},
-                set: lambda x, c: {"$set": tuple(x)},
-                frozenset: lambda x, c: {"$frozenset": tuple(x)},
-                tuple: lambda x, c: {"$tuple": x},
-                re.Pattern: lambda x, c: {"$regex": (x.pattern, x.flags)},
             }
 
             if type_hooks:
-                for k, v in type_hooks.items():
-                    if v:
-                        _type_hooks[k] = v
-                    else:
-                        _type_hooks.pop(k, None)
+                # Merge type hooks and sort classes from child to parent
+                tmp: dict = {**_type_hooks, **type_hooks}
+                keys = sort_class(tmp)
+                _type_hooks = {k: tmp[k] for k in keys if tmp[k] is not None}
 
             _marker_hooks = {
                 "$uuid": lambda x, r: uuid.UUID(x["$uuid"]),
@@ -290,7 +308,7 @@ class Modifier:
 
             if marker_hooks:
                 for _k, _v in marker_hooks.items():
-                    if _v:
+                    if _v is not None:
                         _marker_hooks[_k] = _v
                     else:
                         _marker_hooks.pop(_k, None)
@@ -308,23 +326,16 @@ class Modifier:
                 memo.add(_id)
                 _convert = partial(convert, memo=memo)
 
-                if type(obj) is dict:
-                    obj = {k: _convert(v) for k, v in obj.items()}
-                elif type(obj) in (list, tuple, set, frozenset):
-                    obj = type(obj)(_convert(v) for v in obj)
-
-                ret = obj
-
-                # Try precise match
+                # Try precise matching
                 if type(obj) in _type_hooks:
-                    ret = _type_hooks[type(obj)](obj, _convert)
+                    obj = _type_hooks[type(obj)](obj, _convert)
 
-                # General match
+                # General matching
                 else:
                     for t, hook in _type_hooks.items():
                         if isinstance(obj, t):
-                            ret = hook(obj, _convert)
-                return ret
+                            obj = hook(obj, _convert)
+                return obj
 
             def recover(obj) -> Any:
                 """
@@ -344,11 +355,63 @@ class Modifier:
                 return obj
 
             @s.on.write.pre
-            async def convert_exjson(_: str, s: Storage, data: dict):
+            async def convert_xjson(_: str, s: Storage, data: dict):
                 return await async_run(convert, data)
 
             @s.on.read.post
-            async def recover_exjson(_: str, s: Storage, data: dict):
+            async def recover_xjson(_: str, s: Storage, data: dict):
                 return await async_run(recover, data)
 
             return s
+
+        @staticmethod
+        def Timestamp(
+                tab: T | TinyDB,
+                fmt: str | None = "%Y-%m-%d %H:%M:%S%z",
+                tz: dt.tzinfo | None = dt.timezone.utc,
+                create: bool = True,
+                modify: bool = True,
+                access: bool = False,
+                fields: dict = {  # skipcq: PYL-W0102
+                    "create": "created",
+                    "modify": "modified",
+                    "access": "accessed",
+                }) -> T | Table[IncreID, Document]:
+            """
+            ### Timestamp
+            Add a timestamp field to the data.
+
+            * `tab` - Table or TinyDB instance
+            * `fmt` - Format string for `datetime.strftime`
+            If `None`, use `datetime.datetime()` class
+            (Recommended be used with `ExtendedJSON`).
+            * `tz` - Timezone for timestamp
+            * `create` - Add stamp when being created
+            * `modify` - Add stamp when being modified
+            * `access` - Add stamp when being accessed
+            * `fields` - Field names for each timestamp
+            """
+
+            tab = _get_table(tab)
+
+            def get_time():
+                if fmt is None:
+                    return dt.datetime.now(tz=tz)
+                return dt.datetime.now(tz=tz).strftime(fmt)
+
+            if create:
+                @tab.on.create
+                def create_time(_: str, tab: Table, doc: BaseDocument):
+                    doc[fields["create"]] = get_time()
+
+            if modify:
+                @tab.on.update
+                def modify_time(_: str, tab: Table, doc: BaseDocument):
+                    doc[fields["modify"]] = get_time()
+
+            if access:
+                @tab.on.read
+                def access_time(_: str, tab: Table, doc: BaseDocument):
+                    doc[fields["access"]] = get_time()
+
+            return tab

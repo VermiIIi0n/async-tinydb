@@ -4,7 +4,7 @@ import random
 import tempfile
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -22,7 +22,7 @@ doc = {'none': [None, None], 'int': 42, 'float': 3.1415899999999999,
 
 async def test_json(tmpdir):
     # Write contents
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
     storage = JSONStorage(path)
     await storage.write(doc)
 
@@ -64,7 +64,7 @@ async def test_json_readwrite(tmpdir):
     """
     Regression test for issue #1
     """
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
 
     # Create TinyDB instance
     db = TinyDB(path, storage=JSONStorage)
@@ -92,7 +92,7 @@ async def test_json_readwrite(tmpdir):
 
 async def test_json_read(tmpdir):
     r"""Open a database only for reading"""
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
     with pytest.raises(FileNotFoundError):
         db = TinyDB(path, storage=JSONStorage, access_mode='r')
         await db.get(where('name') == '42')
@@ -273,7 +273,7 @@ async def test_yaml(tmpdir):
             pass
 
     # Write contents
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
     db = TinyDB(path, storage=YAMLStorage)
     await db.insert(doc)
     assert [doc] == await db.all()
@@ -289,7 +289,7 @@ async def test_yaml(tmpdir):
 async def test_encoding(tmpdir):
     japanese_doc = {"Test": u"こんにちは世界"}
 
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
     # cp936 is used for japanese encodings
     jap_storage = JSONStorage(path, encoding="cp936")
     await jap_storage.write(japanese_doc)
@@ -311,7 +311,7 @@ async def test_encoding(tmpdir):
 async def test_storage_event_hooks(tmpdir):
     data = {"ab": 42}
 
-    path = str(tmpdir.join('test.db'))
+    path = tmpdir / "test.db"
     storage = JSONStorage(path)
 
     @storage.on.write.pre
@@ -392,19 +392,19 @@ async def test_encrypted_json(tmpdir):
         EncryptedJSONStorage("test.json", key, access_mode="r+")
     with pytest.raises(ValueError):
         EncryptedJSONStorage("asdf")  # No key provided
-    storage = EncryptedJSONStorage(str(tmpdir.join('test.db')), key=key)
+    storage = EncryptedJSONStorage(tmpdir / "test.db", key=key)
     doc = {"foo": "bar"}
     await storage.write(doc)
     assert doc == await storage.read()
 
     # Re open the encrypted file, and test bytes-as-key
-    storage = EncryptedJSONStorage(str(tmpdir.join('test.db')), key=key.encode("utf-8"),
+    storage = EncryptedJSONStorage(tmpdir / "test.db", key=key.encode("utf-8"),
                                    encryption=Modifier.Encryption.AES_GCM,
                                    compression=Modifier.Compression.brotli)
     await storage.write(doc)
     assert doc == await storage.read()
 
-    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    storage = JSONStorage(tmpdir / "test.db", access_mode="rb+")
 
     @storage.on.write.post
     async def to_str(ev, s, d):
@@ -424,14 +424,14 @@ async def test_encrypted_json(tmpdir):
 
 
 async def test_compress_brotli(tmpdir):
-    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    storage = JSONStorage(tmpdir / "test.db", access_mode="rb+")
     Modifier.Compression.brotli(storage)
     doc = {str(i): i for i in range(10000)}
     await storage.write(doc)
     assert doc == await storage.read()
     await storage.close()
 
-    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    storage = JSONStorage(tmpdir / "test.db", access_mode="rb+")
 
     @storage.on.write.post
     async def to_str(ev, s, d):
@@ -448,14 +448,14 @@ async def test_compress_brotli(tmpdir):
 
 
 async def test_compress_blosc2(tmpdir):
-    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    storage = JSONStorage(tmpdir / "test.db", access_mode="rb+")
     Modifier.Compression.blosc2(storage)
     doc = {str(i): i for i in range(10000)}
     await storage.write(doc)
     assert doc == await storage.read()
     await storage.close()
 
-    storage = JSONStorage(str(tmpdir.join('test.db')), access_mode="rb+")
+    storage = JSONStorage(tmpdir / "test.db", access_mode="rb+")
 
     @storage.on.write.post
     async def to_str(ev, s, d):
@@ -472,8 +472,7 @@ async def test_compress_blosc2(tmpdir):
 
 
 async def test_extended_json(tmpdir):
-    storage = JSONStorage(str(tmpdir.join('test.db')))
-    Modifier.Conversion.ExtendedJSON(storage)
+    storage = JSONStorage(tmpdir / "test.db")
 
     doc = {
         "foo": "bar",
@@ -484,6 +483,7 @@ async def test_extended_json(tmpdir):
         "list": [1, 2, 3],
         "dict": {"a": 1, "b": 2},
         "datetime": datetime(2018, 1, 1, 0, 0, 0),
+        "now": datetime.now(tz=timezone.utc),
         "timedelta": timedelta(days=1),
         "bytes": b"asdf",
         "tuple": (1, 2, 3),
@@ -492,8 +492,18 @@ async def test_extended_json(tmpdir):
         "complex": 1 + 2j,
         "uuid": uuid.UUID("12345678123456781234567812345678"),
         "regex": re.compile("foo"),
+        "subdoc": {
+            "frozenset": frozenset({1, 2, 3}),
+            "complex": 1 + 2j,
+            "uuid": uuid.UUID("12345678123456781234567812345678"),
+            "regex": re.compile("foo"),
+        }
     }
 
+    with pytest.raises(TypeError):
+        await storage.write(doc)
+
+    Modifier.Conversion.ExtendedJSON(storage)
     await storage.write(doc)
     assert doc == await storage.read()
 

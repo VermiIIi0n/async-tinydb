@@ -1,5 +1,4 @@
 import asyncio
-from asyncio import futures
 from functools import partial
 import threading
 import pytest
@@ -10,6 +9,8 @@ from concurrent.futures._base import CancelledError as SyncCancelledError
 from asynctinydb.utils import LRUCache, freeze, FrozenDict, to_async_gen
 from asynctinydb.utils import StrChain, ensure_async, sync_await, mimics
 from asynctinydb.utils import get_create_loop, AsinkRunner, TerminateRunner
+from asynctinydb.utils import FrozenList, is_container, is_hashable, is_iterable
+from asynctinydb.utils import supports_in, sort_class
 
 
 def test_lru_cache():
@@ -26,6 +27,24 @@ def test_lru_cache():
         pass
 
     assert cache.lru == ["c", "a", "d"]
+
+
+def test_inspects():
+    assert is_iterable([1, 2, 3])
+    assert not is_iterable(1)
+    assert is_container([1, 2, 3])
+    assert is_container({1, 2, 3})
+    assert is_container({1: 2, 3: 4})
+    assert not is_container(1)
+    assert is_hashable(1)
+    assert is_hashable("a")
+    assert is_hashable((1, 2, 3))
+    assert not is_hashable([1, 2, 3])
+
+    assert supports_in([1, 2, 3])
+    assert supports_in({1, 2, 3})
+    assert supports_in({1: 2, 3: 4})
+    assert not supports_in(1)
 
 
 def test_lru_cache_set_multiple():
@@ -92,7 +111,7 @@ def test_lru_cache_iteration_works():
     cache = LRUCache()
     count = 0
     for _ in cache:
-        assert False, 'there should be no elements in the cache'
+        assert False, "there should be no elements in the cache"
 
     assert count == 0
 
@@ -105,13 +124,32 @@ def test_mimics():
 
     # init(123)
 
-    assert init.__name__ == 'init'
+    assert init.__name__ == "init"
+
+
+def test_sort_class():
+    class A:
+        ...
+    
+    class B(A):
+        ...
+    
+    class C(B):
+        ...
+    
+    class D(A):
+        ...
+    
+    class E:
+        ...
+    
+    assert sort_class([B, D, C, object, A, E]) == [C, B, D, A, E, object]
 
 
 def test_frozendict():
     d = {'a': 1, 'b': 2}
     fd = FrozenDict(d)
-    assert str(fd) == f"<FrozenDict {d}>"
+    assert str(fd) == f"FrozenDict{d}"
     assert fd['a'] == 1
     assert fd.get('a') == 1
     assert fd.get('n', 123) == 123
@@ -120,12 +158,41 @@ def test_frozendict():
     assert tuple(fd.values()) == tuple(d.values())
     assert tuple(fd.items()) == tuple(d.items())
     assert fd == d
+    assert d == fd
     assert hash(fd)
     assert hash(fd) == hash(fd)
     assert 'a' in fd
     assert 'n' not in fd
     assert all(k in d for k in fd)
     assert len(fd) == 2
+
+    fd2 = FrozenDict(fd)
+    assert fd2 is fd
+    assert fd2 == fd
+    assert fd == FrozenDict(d)
+
+
+def test_frozenlist():
+    fl = FrozenList([1, 2, 3])
+    h1 = hash(fl)
+    assert h1 == hash(fl)
+    assert fl == [1, 2, 3]
+    assert fl >= [1, 2, 3]
+    assert fl >= [1, 2]
+    assert fl > [1, 2]
+    assert fl <= [1, 2, 3]
+    assert fl <= [1, 2, 3, 4]
+    assert fl < [1, 2, 3, 4]
+    assert fl != [1, 2, 3, 4]
+    assert repr(fl) == "FrozenList(1, 2, 3)"
+    assert [1, 2, 3] == fl
+    assert [1, 2] != fl
+    assert isinstance(fl, tuple)
+    assert fl[0] == 1
+    t = (1, 2, 3)
+    assert t is tuple(t)
+    assert fl == t
+    assert fl is FrozenList(fl)
 
 
 def test_freeze():
@@ -134,11 +201,15 @@ def test_freeze():
     assert isinstance(frozen[3], FrozenDict)
     assert isinstance(frozen[3]['a'], tuple)
     assert isinstance(frozen[4], frozenset)
+    assert 12345 == freeze(12345)
 
     d = {}
     d['d'] = d
-    with pytest.raises(ValueError, match="recursive"):
+    with pytest.raises(TypeError, match="recursive"):
         freeze(d)
+    
+    with pytest.raises(TypeError, match="unhashable"):
+        freeze({1: LRUCache()}, True)
 
     with pytest.raises(TypeError):
         frozen[0] = 10
@@ -151,6 +222,12 @@ def test_freeze():
 
     with pytest.raises(AttributeError):
         frozen[3].update({'a': 9})
+    
+    class Freezable:
+        def __freeze__(self, memo):
+            return 123
+
+    assert freeze(Freezable()) == 123
 
 
 async def test_get_create_loop():

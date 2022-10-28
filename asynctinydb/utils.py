@@ -4,21 +4,24 @@ Utility functions.
 
 from __future__ import annotations
 from collections import OrderedDict
+from contextlib import suppress
 from . import async_utils
 from .async_utils import *
-from typing import Iterator, Mapping, MutableSequence, \
-    MutableSet, TypeVar, Generic, Type, \
+from typing import Iterator, Mapping, TypeVar, Generic, Type, \
     TYPE_CHECKING, Iterable, Any, Callable, Sequence, overload, MutableMapping
 
 K = TypeVar("K")
 V = TypeVar("V")
 D = TypeVar("D")
 T = TypeVar("T")
+K_co = TypeVar("K_co", covariant=True)
+V_co = TypeVar("V_co", covariant=True)
 S = TypeVar("S", bound="StrChain")
 C = TypeVar("C", bound=Callable)
 
-__all__ = (("LRUCache", "freeze", "with_typehint", "stringfy_keys"
-            "StrChain", "FrozenDict", "mimics")
+__all__ = (("LRUCache", "freeze", "with_typehint", "stringfy_keys",
+            "supports_in", "is_container", "is_iterable", "is_hashable",
+            "StrChain", "FrozenDict", "mimics", "sort_class", "FrozenList")
            + async_utils.__all__)
 
 
@@ -55,10 +58,36 @@ def with_typehint(baseclass: Type[T]):
     return object
 
 
+def is_hashable(obj) -> bool:
+    with suppress(TypeError):
+        hash(obj)
+        return True
+    return False
+
+
+def is_iterable(obj) -> bool:
+    return hasattr(obj, "__iter__")
+
+
+def is_container(obj) -> bool:
+    return hasattr(obj, "__contains__")
+
+
+def supports_in(obj) -> bool:
+    """
+    Check if an object supports the ``in`` operator.
+
+    Be careful: When a `Generator` be evaluated when using ``in``
+    and the desired value never appears, the statement could never end.
+    """
+    return any(hasattr(obj, attr)
+               for attr in ("__contains__", "__iter__", "__getitem__"))
+
+
 def stringfy_keys(data, memo: dict = None):
     if memo is None:
         memo = {}
-    if isinstance(data, MutableMapping):
+    if isinstance(data, Mapping):
         if id(data) in memo:
             return memo[id(data)]
         memo[id(data)] = {}  # Placeholder in case of loop references
@@ -68,6 +97,22 @@ def stringfy_keys(data, memo: dict = None):
     if isinstance(data, list | tuple):
         return [stringfy_keys(v, memo) for v in data]
     return data
+
+
+def sort_class(cls: Iterable[type]) -> list[type]:
+    """Sort classes by inheritance. From child to parent."""
+    ls: list[type] = []
+    for c in cls:
+        it = iter(enumerate(ls))
+        try:
+            while True:
+                i, p = next(it)
+                if issubclass(c, p):
+                    ls.insert(i, c)
+                    break
+        except StopIteration:
+            ls.append(c)
+    return ls
 
 
 class LRUCache(MutableMapping, Generic[K, V]):
@@ -145,7 +190,7 @@ class LRUCache(MutableMapping, Generic[K, V]):
                 self.cache.popitem(last=False)
 
 
-class FrozenDict(Mapping[K, V]):
+class FrozenDict(Mapping[K_co, V_co]):
     """
     An immutable dictionary.
 
@@ -154,32 +199,45 @@ class FrozenDict(Mapping[K, V]):
     class removes the mutability and implements the ``__hash__`` method.
     """
 
+    def __new__(cls, *args, **kw):
+        if len(args) == 1 and isinstance(args[0], FrozenDict) and not kw:
+            return args[0]
+        return super().__new__(cls)
+
     @overload
     def __init__(self): ...
     @overload
-    def __init__(self: FrozenDict[str, V], **kw: V): ...
+    def __init__(self: FrozenDict[str, V_co], **kw: V_co): ...
     @overload
-    def __init__(self, _map: Mapping[K, V]): ...
+    def __init__(self, _map: Mapping[K_co, V_co]): ...
+
     @overload
-    def __init__(self: FrozenDict[str, V], _map: Mapping[str, V], **kw: V): ...
+    def __init__(self: FrozenDict[str, V_co],
+                 _map: Mapping[str, V_co], **kw: V_co): ...
+
     @overload
-    def __init__(self, _iter: Iterable[tuple[K, V]]): ...
+    def __init__(self, _iter: Iterable[tuple[K_co, V_co]]): ...
+
     @overload
-    def __init__(self: FrozenDict[str, V], _: Iterable[tuple[str, V]], **kw: V): ...
+    def __init__(self: FrozenDict[str, V_co],
+                 _: Iterable[tuple[str, V_co]], **kw: V_co): ...
+
     @overload
     def __init__(self: FrozenDict[str, str], _iter: Iterable[list[str]]): ...
 
     def __init__(self, *args, **kw):
+        if hasattr(self, "_dict"):
+            return
         super().__init__()
         self._dict = dict[K, V](*args, **kw)
         self._hash = None
 
     def __repr__(self):
-        return f"<FrozenDict {self._dict}>"
+        return f"FrozenDict{self._dict}"
 
     def __hash__(self):
         if self._hash is None:
-            # Calculate the hash by hashing a tuple of sorted hashes of dict k/v pairs
+            # Calculate the hash of a tuple of sorted hashes of k/v pairs
             self._hash = hash(tuple(sorted(hash((k, v))
                               for k, v in self.items())))
         return self._hash
@@ -197,6 +255,8 @@ class FrozenDict(Mapping[K, V]):
         return __o in self._dict
 
     def __eq__(self, __o: object) -> bool:
+        if isinstance(__o, FrozenDict):
+            return self._dict == __o._dict
         return self._dict == __o
 
     def get(self, key, default=None):
@@ -212,25 +272,101 @@ class FrozenDict(Mapping[K, V]):
         return self._dict.values()
 
 
-def freeze(obj, memo: set[int] = None):
+class FrozenList(tuple[V_co]):
+    """
+    # FrozenList Class
+    Basically just a tuple, but is able to be compared with lists.
+    """
+
+    def __new__(cls, value: Iterable[V_co]):
+        if isinstance(value, FrozenList):
+            return value
+        return tuple.__new__(cls, value)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, list):
+            return self == tuple(other)
+        return super().__eq__(other)
+
+    def __ne__(self, other) -> bool:
+        return not self == other
+
+    def __gt__(self, other) -> bool:
+        if isinstance(other, list):
+            return self > tuple(other)
+        return super().__gt__(other)
+
+    def __ge__(self, other) -> bool:
+        if isinstance(other, list):
+            return self >= tuple(other)
+        return super().__ge__(other)
+
+    def __lt__(self, other) -> bool:
+        return not self >= other
+
+    def __le__(self, other) -> bool:
+        if isinstance(other, list):
+            return self <= tuple(other)
+        return super().__le__(other)
+
+    def __hash__(self) -> int:
+        return tuple.__hash__(self)
+
+    def __repr__(self) -> str:
+        return f"FrozenList{super().__repr__()}"
+
+
+@overload
+def freeze(obj: dict, ensure_hashable=False,  # type: ignore[misc]
+           *, memo: set[int] = None) -> FrozenDict: ...
+
+
+@overload
+def freeze(obj: list, ensure_hashable=False,  # type: ignore[misc]
+           *, memo: set[int] = None) -> FrozenList: ...
+
+
+@overload
+def freeze(obj: set, ensure_hashable=False,  # type: ignore[misc]
+           *, memo: set[int] = None) -> frozenset: ...
+
+
+@overload
+def freeze(obj: V, ensure_hashable=False, *, memo: set[int] = None) -> V: ...
+
+
+def freeze(obj, ensure_hashable=False, *, memo: set[int] = None):
     """
     Freeze an object by making it immutable and thus hashable.
+
+    **Conservative approach, freezes elements of
+    (`list` | `tuple` | `dict` | `FrozenDict` | `set` | `frozenset`)**
+
+    * `obj` is the object to freeze.
+    * `ensure_hashable` If `True`, raise `TypeError` when unable to freeze
     """
+
     if memo is None:
         memo = set()
     if id(obj) in memo:
-        raise ValueError("Cannot freeze recursive data structures")
+        raise TypeError("Cannot freeze recursive data structures")
     memo.add(id(obj))
-
-    if isinstance(obj, MutableMapping):
+    if hasattr(obj, "__freeze__"):
+        obj = obj.__freeze__(memo=memo.copy())
+    elif isinstance(obj, dict | FrozenDict):
         # Transform dicts into ``FrozenDict``s
-        return FrozenDict((k, freeze(v, memo.copy())) for k, v in obj.items())
-    if isinstance(obj, MutableSequence):
-        # Transform lists into tuples
-        return tuple(freeze(el, memo.copy()) for el in obj)
-    if isinstance(obj, MutableSet):
+        return FrozenDict((k, freeze(v, ensure_hashable, memo=memo.copy()))
+                          for k, v in obj.items())
+    elif isinstance(obj, list | tuple):
+        # Transform sequences into FrozenLists
+        return FrozenList(freeze(el, ensure_hashable, memo=memo.copy())
+                          for el in obj)
+    elif isinstance(obj, set | frozenset):
         # Transform sets into ``frozenset``s
-        return frozenset(freeze(item, memo.copy()) for item in obj)
+        return frozenset(freeze(item, ensure_hashable, memo=memo.copy())
+                         for item in obj)
+    if ensure_hashable:
+        hash(obj)
     return obj
 
 
@@ -274,7 +410,7 @@ class StrChain(Sequence[str]):
             self: S,
             it: str | Iterable[str] | None = None,
             joint: str = '.',
-            callback: Callable[..., Any] = str,
+            callback=str,
             **kw):
         """
         * `it`: Iterable[str], the initial string chain
@@ -288,7 +424,7 @@ class StrChain(Sequence[str]):
         it = [it] if isinstance(it, str) else it
         self._list: list[str] = list(it or [])
 
-    def __call__(self: S, *args: Any, **kw: Any) -> Any:
+    def __call__(self: S, *args: Any, **kw: Any):
         return self._callback(self, *args, **kw)
 
     def __create(self: S, it: Iterable[str]) -> S:
@@ -375,3 +511,6 @@ class StrChain(Sequence[str]):
         return (f"{type(self).__name__}({self._list!r}, "
                 f"joint={self._joint!r}, "
                 f"callback={self._callback!r}, **{self._kw!r})")
+
+
+v = StrChain(["123", '.'])()

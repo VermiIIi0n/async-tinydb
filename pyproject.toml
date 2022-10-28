@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.5.1"
+version = "1.5.2"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -13,6 +13,8 @@ keywords = ["database", "nosql", "async"]
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "Framework :: AsyncIO",
+    "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
@@ -36,10 +38,6 @@ packages = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "--verbose --cov-append --cov-report term --cov asynctinydb --cov-config .coveragerc"
-
-[tool.flake8]
-max-line-length = 88
-extend-ignore = ["W291", "E704", "E266"]
 
 [tool.mypy]
 enable_error_code = [

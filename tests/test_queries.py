@@ -2,7 +2,27 @@ import re
 
 import pytest
 
-from asynctinydb.queries import Query, where
+from asynctinydb.queries import Query, where, is_cacheable
+from collections import deque
+
+
+def test_is_cacheable():
+    class OldQlike:
+        def is_cacheable(self):
+            return False
+    
+    with pytest.warns(DeprecationWarning):
+        assert not is_cacheable(OldQlike())
+    
+    class NewQlike:
+        @property
+        def cacheable(self):
+            return False
+    
+    assert not is_cacheable(NewQlike())
+
+    with pytest.warns(DeprecationWarning):
+        assert is_cacheable(None)
 
 
 def test_no_path():
@@ -11,44 +31,50 @@ def test_no_path():
 
 
 def test_path_exists():
-    query = Query()['value'].exists()
-    assert query == where('value').exists()
-    assert query({'value': 1})
-    assert not query({'something': 1})
+    query = Query()["value"].exists()
+    assert query == where("value").exists()
+    assert query({"value": 1})
+    assert not query({"something": 1})
     assert hash(query)
-    assert hash(query) != hash(where('asd'))
+    assert hash(query) != hash(where("asd"))
 
-    query = Query()['value']['val'].exists()
-    assert query == where('value')['val'].exists()
-    assert query({'value': {'val': 2}})
-    assert not query({'value': 1})
-    assert not query({'value': {'asd': 1}})
-    assert not query({'something': 1})
+    query = Query()["value"]["val"].exists()
+    assert query == where("value")["val"].exists()
+    assert query({"value": {"val": 2}})
+    assert not query({"value": 1})
+    assert not query({"value": {"asd": 1}})
+    assert not query({"something": 1})
     assert hash(query)
-    assert hash(query) != hash(where('asd'))
+    assert hash(query) != hash(where("asd"))
+
+    with pytest.warns(DeprecationWarning):
+        assert Query().is_cacheable()
+    
+    with pytest.warns(UserWarning):
+        Query()._path_with_
 
 
 def test_path_and():
-    query = Query()['value'].exists() & (Query()['value'] == 5)
-    assert query({'value': 5})
-    assert not query({'value': 10})
-    assert not query({'something': 1})
+    query = Query()["value"].exists() & (Query()["value"] == 5)
+    assert query({"value": 5})
+    assert not query({"value": 10})
+    assert not query({"something": 1})
     assert hash(query)
-    assert hash(query) != hash(where('value'))
+    assert hash(query) != hash(where("value"))
 
     # Test unhashable
-    query._hash = None
-    query = query & (Query()['value'] == 5)
-    assert not query.is_cacheable()
-    query = query | (Query()['value'] == 5)
-    assert not query.is_cacheable()
+    query._cacheable = False
+    query = query & (Query()["value"] == 5)
+    assert not query.cacheable
+    query = query | (Query()["value"] == 5)
+    assert not query.cacheable
 
 
 def test_callable_in_path_with_map():
     def double(x): return x + x
     query = Query().value.map(double) == 10
-    assert query({'value': 5})
-    assert not query({'value': 10})
+    assert query({"value": 5})
+    assert not query({"value": 10})
 
 
 def test_callable_in_path_with_chain():
@@ -59,57 +85,63 @@ def test_callable_in_path_with_chain():
 
 def test_eq():
     query = Query().value == 1
-    assert query({'value': 1})
-    assert not query({'value': 2})
+    assert query({"value": 1})
+    assert not query({"value": 2})
     assert hash(query)
 
     query = Query().value == [0, 1]
-    assert query({'value': [0, 1]})
-    assert not query({'value': [0, 1, 2]})
+    assert query({"value": [0, 1]})
+    assert not query({"value": [0, 1, 2]})
     assert hash(query)
+
+    query = Query().value == deque()
+    assert not query.cacheable
+
+    with pytest.raises(TypeError):
+        hash(query)
 
 
 def test_ne():
     query = Query().value != 1
-    assert query({'value': 0})
-    assert query({'value': 2})
-    assert not query({'value': 1})
+    assert query({"value": 0})
+    assert query({"value": 2})
+    assert not query({"value": 1})
     assert hash(query)
 
     query = Query().value != [0, 1]
-    assert query({'value': [0, 1, 2]})
-    assert not query({'value': [0, 1]})
+    assert query({"value": [0, 1, 2]})
+    assert not query({"value": [0, 1]})
     assert hash(query)
 
 
 def test_lt():
     query = Query().value < 1
-    assert query({'value': 0})
-    assert not query({'value': 1})
-    assert not query({'value': 2})
+    assert query({"value": 0})
+    assert not query({"value": 1})
+    assert not query({"value": 2})
     assert hash(query)
 
 
 def test_le():
     query = Query().value <= 1
-    assert query({'value': 0})
-    assert query({'value': 1})
-    assert not query({'value': 2})
+    assert query({"value": 0})
+    assert query({"value": 1})
+    assert not query({"value": 2})
     assert hash(query)
 
 
 def test_gt():
     query = Query().value > 1
-    assert query({'value': 2})
-    assert not query({'value': 1})
+    assert query({"value": 2})
+    assert not query({"value": 1})
     assert hash(query)
 
 
 def test_ge():
     query = Query().value >= 1
-    assert query({'value': 2})
-    assert query({'value': 1})
-    assert not query({'value': 0})
+    assert query({"value": 2})
+    assert query({"value": 1})
+    assert not query({"value": 0})
     assert hash(query)
 
 
@@ -118,10 +150,10 @@ def test_or():
             (Query().val1 == 1) |
             (Query().val2 == 2)
     )
-    assert query({'val1': 1})
-    assert query({'val2': 2})
-    assert query({'val1': 1, 'val2': 2})
-    assert not query({'val1': '', 'val2': ''})
+    assert query({"val1": 1})
+    assert query({"val2": 2})
+    assert query({"val1": 1, "val2": 2})
+    assert not query({"val1": '', "val2": ''})
     assert hash(query)
 
 
@@ -130,64 +162,92 @@ def test_and():
             (Query().val1 == 1) &
             (Query().val2 == 2)
     )
-    assert query({'val1': 1, 'val2': 2})
-    assert not query({'val1': 1})
-    assert not query({'val2': 2})
-    assert not query({'val1': '', 'val2': ''})
+    assert query({"val1": 1, "val2": 2})
+    assert not query({"val1": 1})
+    assert not query({"val2": 2})
+    assert not query({"val1": '', "val2": ''})
     assert hash(query)
 
 
 def test_not():
     query = ~ (Query().val1 == 1)
-    assert query({'val1': 5, 'val2': 2})
-    assert not query({'val1': 1, 'val2': 2})
+    assert query({"val1": 5, "val2": 2})
+    assert not query({"val1": 1, "val2": 2})
     assert hash(query)
 
     query = (
             (~ (Query().val1 == 1)) &
             (Query().val2 == 2)
     )
-    assert query({'val1': '', 'val2': 2})
-    assert query({'val2': 2})
-    assert not query({'val1': 1, 'val2': 2})
-    assert not query({'val1': 1})
-    assert not query({'val1': '', 'val2': ''})
+    assert query({"val1": '', "val2": 2})
+    assert query({"val2": 2})
+    assert not query({"val1": 1, "val2": 2})
+    assert not query({"val1": 1})
+    assert not query({"val1": '', "val2": ''})
     assert hash(query)
 
 
 def test_has_key():
     query = Query().val3.exists()
 
-    assert query({'val3': 1})
-    assert not query({'val1': 1, 'val2': 2})
+    assert query({"val3": 1})
+    assert not query({"val1": 1, "val2": 2})
     assert hash(query)
 
 
 def test_regex():
-    query = Query().val.matches(r'\d{2}\.')
+    query = Query().val.matches(r"\d{2}\.")
 
-    assert query({'val': '42.'})
-    assert not query({'val': '44'})
-    assert not query({'val': 'ab.'})
-    assert not query({'val': 155})
-    assert not query({'val': False})
+    assert query({"val": "42."})
+    assert not query({"val": "44"})
+    assert not query({"val": "ab."})
+    assert not query({"val": 155})
+    assert not query({"val": False})
     assert not query({'': None})
     assert hash(query)
 
-    query = Query().val.search(r'\d+')
+    query = Query().val.search(r"\d+")
 
-    assert query({'val': 'ab3'})
-    assert not query({'val': 'abc'})
-    assert not query({'val': ''})
-    assert not query({'val': True})
+    assert query({"val": "ab3"})
+    assert not query({"val": "abc"})
+    assert not query({"val": ''})
+    assert not query({"val": True})
     assert not query({'': None})
     assert hash(query)
 
-    query = Query().val.search(r'JOHN', flags=re.IGNORECASE)
-    assert query({'val': 'john'})
-    assert query({'val': 'xJohNx'})
-    assert not query({'val': 'JOH'})
-    assert not query({'val': 12})
+    query = Query().val.search(r"JOHN", flags=re.IGNORECASE)
+    assert query({"val": "john"})
+    assert query({"val": "xJohNx"})
+    assert not query({"val": "JOH"})
+    assert not query({"val": 12})
+    assert not query({'': None})
+    assert hash(query)
+
+
+    query = Query().val.matches(re.compile(r"\d{2}\."))
+
+    assert query({"val": "42."})
+    assert not query({"val": "44"})
+    assert not query({"val": "ab."})
+    assert not query({"val": 155})
+    assert not query({"val": False})
+    assert not query({'': None})
+    assert hash(query)
+
+    query = Query().val.search(re.compile(r"\d+"))
+
+    assert query({"val": "ab3"})
+    assert not query({"val": "abc"})
+    assert not query({"val": ''})
+    assert not query({"val": True})
+    assert not query({'': None})
+    assert hash(query)
+
+    query = Query().val.search(re.compile(r"JOHN", flags=re.IGNORECASE))
+    assert query({"val": "john"})
+    assert query({"val": "xJohNx"})
+    assert not query({"val": "JOH"})
+    assert not query({"val": 12})
     assert not query({'': None})
     assert hash(query)
 
@@ -198,9 +258,9 @@ def test_custom():
 
     query = Query().val.test(test)
 
-    assert query({'val': 42})
-    assert not query({'val': 40})
-    assert not query({'val': '44'})
+    assert query({"val": 42})
+    assert not query({"val": 40})
+    assert not query({"val": "44"})
     assert not query({'': None})
     assert hash(query)
 
@@ -208,11 +268,11 @@ def test_custom():
         return value in l
 
     query = Query().val.test(in_list, (25, 35))
-    assert not query({'val': 20})
-    assert query({'val': 25})
-    assert not query({'val': 30})
-    assert query({'val': 35})
-    assert not query({'val': 36})
+    assert not query({"val": 20})
+    assert query({"val": 25})
+    assert not query({"val": 30})
+    assert query({"val": 35})
+    assert not query({"val": 36})
     assert hash(query)
 
 
@@ -222,137 +282,190 @@ def test_custom_with_params():
 
     query = Query().val.test(test, 1, 10)
 
-    assert query({'val': 5})
-    assert not query({'val': 0})
-    assert not query({'val': 11})
+    assert query({"val": 5})
+    assert not query({"val": 0})
+    assert not query({"val": 11})
     assert not query({'': None})
     assert hash(query)
 
 
 def test_any():
-    query = Query().followers.any(Query().name == 'don')
+    query = Query().followers.any(Query().name == "don")
 
-    assert query({'followers': [{'name': 'don'}, {'name': 'john'}]})
-    assert not query({'followers': 1})
+    assert query({"followers": [{"name": "don"}, {"name": "john"}]})
+    assert not query({"followers": 1})
     assert not query({})
     assert hash(query)
 
-    query = Query().followers.any(Query().num.matches('\\d+'))
-    assert query({'followers': [{'num': '12'}, {'num': 'abc'}]})
-    assert not query({'followers': [{'num': 'abc'}]})
+    query = Query().followers.any(Query().num.matches("\\d+"))
+    assert query({"followers": [0, {"num": "12"}, {"num": "abc"}]})
+    assert not query({"followers": [{"num": "abc"}]})
     assert hash(query)
 
-    query = Query().followers.any(['don', 'jon'])
-    assert query({'followers': ['don', 'greg', 'bill']})
-    assert not query({'followers': ['greg', 'bill']})
+    query = Query().followers.any(["don", "jon"])
+    assert query({"followers": [1234, "don", "greg", "bill"]})
+    assert not query({"followers": ["greg", "bill"]})
     assert not query({})
     assert hash(query)
 
-    query = Query().followers.any([{'name': 'don'}, {'name': 'john'}])
-    assert query({'followers': [{'name': 'don'}, {'name': 'greg'}]})
-    assert not query({'followers': [{'name': 'greg'}]})
+    query = Query().followers.any([{"name": "don"}, {"name": "john"}])
+    assert query({"followers": [123, {"name": "don"}, {"name": "greg"}]})
+    assert not query({"followers": [{"name": "greg"}]})
+    assert not query({"followers": [123, 456]})
+    assert not query({"followers": 123})
     assert hash(query)
+
+    query = Query().value.any([deque([1,2,3]), "abc", "def"])
+    assert not query.cacheable
+    assert query({"value": [123, "tyu", deque([1,2,3])]})
+    assert query({"value": ["abc"]})
+    assert query({"value": ["def"]})
+    assert not query({"value": ["ghi"]})
+    assert not query({"value": "ghi"})
+    assert not query({"value": [1]})
+    assert not query({"value": [123, deque([1,2])]})
+    assert not query({"value": 1})
+
+    cond = Query().deque == deque([1,2,3])
+    query = Query().value.any(cond)
+    assert not cond.cacheable
+    assert not query.cacheable
+    assert query({"value": [{"deque":deque([1,2,3])}]})
+    assert not query({"value": [{"deque":deque([1,2])}]})
 
 
 def test_all():
-    query = Query().followers.all(Query().name == 'don')
-    assert query({'followers': [{'name': 'don'}]})
-    assert not query({'followers': [{'name': 'don'}, {'name': 'john'}]})
+    query = Query().followers.all(Query().name == "don")
+    assert query({"followers": [{"name": "don"}]})
+    assert not query({"followers": [{"name": "don"}, {"name": "john"}]})
     assert hash(query)
 
-    query = Query().followers.all(Query().num.matches('\\d+'))
-    assert query({'followers': [{'num': '123'}, {'num': '456'}]})
-    assert not query({'followers': [{'num': '123'}, {'num': 'abc'}]})
+    query = Query().followers.all(Query().num.matches("\\d+"))
+    assert query({"followers": [{"num": "123"}, {"num": "456"}]})
+    assert not query({"followers": [{"num": "123"}, {"num": "abc"}]})
     assert hash(query)
 
-    query = Query().followers.all(['don', 'john'])
-    assert query({'followers': ['don', 'john', 'greg']})
-    assert not query({'followers': ['don', 'greg']})
+    query = Query().followers.all(["don", "john"])
+    assert query({"followers": ["don", "john", "greg"]})
+    assert not query({"followers": ["don", "greg"]})
+    assert not query({"followers": [1234, "don", "greg"]})
+    assert not query({"followers": [deque(), "don", "greg"]})
     assert not query({})
     assert hash(query)
 
-    query = Query().followers.all([{'name': 'jane'}, {'name': 'john'}])
-    assert query({'followers': [{'name': 'john'}, {'name': 'jane'}]})
-    assert query({'followers': [{'name': 'john'},
-                                {'name': 'jane'},
-                                {'name': 'bob'}]})
-    assert not query({'followers': [{'name': 'john'}, {'name': 'bob'}]})
+    query = Query().followers.all([{"name": "jane"}, {"name": "john"}])
+    assert query({"followers": [{"name": "john"}, {"name": "jane"}]})
+    assert query({"followers": [{"name": "john"},
+                                {"name": "jane"},
+                                {"name": "bob"}]})
+    assert not query({"followers": [{"name": "john"}, {"name": "bob"}]})
+    assert not query({"followers": 123456})
     assert hash(query)
 
+    query = Query().value.all([deque([1,2,3]), "abc", "def"])
+    assert not query.cacheable
+    assert query({"value": [deque([1,2,3]), "abc", "def"]})
+    assert not query({"value": [deque([1,2,3]), "abc"]})
+    assert not query({"value": [deque([1,2,3])]})
 
-def test_has():
+    cond = Query().deque == deque([1,2,3])
+    query = Query().value.all(cond)
+    assert not cond.cacheable
+    assert not query.cacheable
+    assert query({"value": [{"deque":deque([1,2,3])}]})
+    assert not query({"value": [1234, {"deque":deque([1,2,3])}]})
+    assert not query({"value": [{"deque":deque([1,2])}]})
+    assert not query({"value": [{"deque":deque([1,2,3])}, {"deque":deque([1,2])}]})
+
+
+def test_exists():
     query = Query().key1.key2.exists()
     str(query)  # This used to cause a bug...
 
-    assert query({'key1': {'key2': {'key3': 1}}})
-    assert query({'key1': {'key2': 1}})
-    assert not query({'key1': 3})
-    assert not query({'key1': {'key1': 1}})
-    assert not query({'key2': {'key1': 1}})
+    assert query({"key1": {"key2": {"key3": 1}}})
+    assert query({"key1": {"key2": 1}})
+    assert not query({"key1": 3})
+    assert not query({"key1": {"key1": 1}})
+    assert not query({"key2": {"key1": 1}})
     assert hash(query)
 
     query = Query().key1.key2 == 1
 
-    assert query({'key1': {'key2': 1}})
-    assert not query({'key1': {'key2': 2}})
+    assert query({"key1": {"key2": 1}})
+    assert not query({"key1": {"key2": 2}})
     assert hash(query)
 
     # Nested has: key exists
     query = Query().key1.key2.key3.exists()
-    assert query({'key1': {'key2': {'key3': 1}}})
+    assert query({"key1": {"key2": {"key3": 1}}})
     # Not a dict
-    assert not query({'key1': 1})
-    assert not query({'key1': {'key2': 1}})
+    assert not query({"key1": 1})
+    assert not query({"key1": {"key2": 1}})
     # Wrong key
-    assert not query({'key1': {'key2': {'key0': 1}}})
-    assert not query({'key1': {'key0': {'key3': 1}}})
-    assert not query({'key0': {'key2': {'key3': 1}}})
+    assert not query({"key1": {"key2": {"key0": 1}}})
+    assert not query({"key1": {"key0": {"key3": 1}}})
+    assert not query({"key0": {"key2": {"key3": 1}}})
 
     assert hash(query)
 
     # Nested has: check for value
     query = Query().key1.key2.key3 == 1
-    assert query({'key1': {'key2': {'key3': 1}}})
-    assert not query({'key1': {'key2': {'key3': 0}}})
+    assert query({"key1": {"key2": {"key3": 1}}})
+    assert not query({"key1": {"key2": {"key3": 0}}})
     assert hash(query)
 
     # Test special methods: regex matches
-    query = Query().key1.value.matches(r'\d+')
-    assert query({'key1': {'value': '123'}})
-    assert not query({'key2': {'value': '123'}})
-    assert not query({'key2': {'value': 'abc'}})
+    query = Query().key1.value.matches(r"\d+")
+    assert query({"key1": {"value": "123"}})
+    assert not query({"key2": {"value": "123"}})
+    assert not query({"key2": {"value": "abc"}})
     assert hash(query)
 
     # Test special methods: regex contains
-    query = Query().key1.value.search(r'\d+')
-    assert query({'key1': {'value': 'a2c'}})
-    assert not query({'key2': {'value': 'a2c'}})
-    assert not query({'key2': {'value': 'abc'}})
+    query = Query().key1.value.search(r"\d+")
+    assert query({"key1": {"value": "a2c"}})
+    assert not query({"key2": {"value": "a2c"}})
+    assert not query({"key2": {"value": "abc"}})
     assert hash(query)
 
     # Test special methods: nested has and regex matches
-    query = Query().key1.x.y.matches(r'\d+')
-    assert query({'key1': {'x': {'y': '123'}}})
-    assert not query({'key1': {'x': {'y': 'abc'}}})
+    query = Query().key1.x.y.matches(r"\d+")
+    assert query({"key1": {'x': {'y': "123"}}})
+    assert not query({"key1": {'x': {'y': "abc"}}})
     assert hash(query)
 
     # Test special method: nested has and regex contains
-    query = Query().key1.x.y.search(r'\d+')
-    assert query({'key1': {'x': {'y': 'a2c'}}})
-    assert not query({'key1': {'x': {'y': 'abc'}}})
+    query = Query().key1.x.y.search(r"\d+")
+    assert query({"key1": {'x': {'y': "a2c"}}})
+    assert not query({"key1": {'x': {'y': "abc"}}})
     assert hash(query)
 
     # Test special methods: custom test
     query = Query().key1.int.test(lambda x: x == 3)
-    assert query({'key1': {'int': 3}})
+    assert query({"key1": {"int": 3}})
     assert hash(query)
 
 
 def test_one_of():
-    query = Query().key1.one_of(['value 1', 'value 2'])
-    assert query({'key1': 'value 1'})
-    assert query({'key1': 'value 2'})
-    assert not query({'key1': 'value 3'})
+    query = Query().key1.one_of(["value 1", "value 2"])
+    assert query({"key1": "value 1"})
+    assert query({"key1": "value 2"})
+    assert not query({"key1": "value 3"})
+
+    query = Query().key1.one_of(deque([1,2,3]))
+    assert query.cacheable
+    assert query({"key1": 1})
+    assert query({"key1": 2})
+    assert query({"key1": 3})
+    assert not query({"key1": 4})
+    assert not query({"key1": deque()})
+
+    query = Query().key1.one_of([deque([1,2]), deque([3,4])])
+    assert not query.cacheable
+    assert query({"key1": deque([1,2])})
+    assert query({"key1": deque([3,4])})
+    assert not query({"key1": deque([1,3])})
+    assert not query({"key1": deque([1,2,3])})
 
 
 def test_hash():
@@ -365,7 +478,7 @@ def test_hash():
 
     assert (Query().key1 == 2) in d
     assert (Query().key1.key2.key3.exists()) in d
-    assert (Query()['key1.key2'].key3.exists()) not in d
+    assert (Query()["key1.key2"].key3.exists()) not in d
 
     # Commutative property of & and |
     assert (Query().key1.exists() & Query().key2.exists()) in d
@@ -375,10 +488,10 @@ def test_hash():
 
 
 def test_orm_usage():
-    data = {'name': 'John', 'age': {'year': 2000}}
+    data = {"name": "John", "age": {"year": 2000}}
 
     User = Query()
-    query1 = User.name == 'John'
+    query1 = User.name == "John"
     query2 = User.age.year == 2000
     assert query1(data)
     assert query2(data)
@@ -388,7 +501,7 @@ def test_repr():
     Fruit = Query()
 
     assert repr(Fruit) == "Query()"
-    assert repr(Fruit.type == 'peach') == "QueryImpl('==', ('type',), 'peach')"
+    assert repr(Fruit.type == "peach") == "QueryImpl('==', ('type',), 'peach')"
 
 
 def test_subclass():
@@ -397,13 +510,13 @@ def test_subclass():
         def equal_double(self, rhs):
             return self._generate_test(
                 lambda value: value == rhs * 2,
-                ('equal_double', self._path, rhs)
+                ("equal_double", self._path, rhs)
             )
 
-    query = MyQueryClass().val.equal_double('42')
+    query = MyQueryClass().val.equal_double("42")
 
-    assert query({'val': '4242'})
-    assert not query({'val': '42'})
+    assert query({"val": "4242"})
+    assert not query({"val": "42"})
     assert not query({'': None})
     assert hash(query)
 
@@ -411,42 +524,42 @@ def test_subclass():
 def test_noop():
     query = Query().noop()
 
-    assert query({'foo': True})
-    assert query({'foo': None})
+    assert query({"foo": True})
+    assert query({"foo": None})
     assert query({})
 
 
 def test_equality():
     q = Query()
     assert (q.foo == 2) != 0
-    assert (q.foo == 'yes') != ''
+    assert (q.foo == "yes") != ''
 
 
 def test_empty_query_error():
-    with pytest.raises(RuntimeError, match='Empty query was evaluated'):
+    with pytest.raises(RuntimeError, match="Empty query was evaluated"):
         Query()({})
 
 
 def test_fragment():
     query = Query().fragment({'a': 4, 'b': True})
 
-    assert query({'a': 4, 'b': True, 'c': 'yes'})
-    assert not query({'a': 4, 'c': 'yes'})
-    assert not query({'b': True, 'c': 'yes'})
-    assert not query({'a': 5, 'b': True, 'c': 'yes'})
-    assert not query({'a': 4, 'b': 'no', 'c': 'yes'})
+    assert query({'a': 4, 'b': True, 'c': "yes"})
+    assert not query({'a': 4, 'c': "yes"})
+    assert not query({'b': True, 'c': "yes"})
+    assert not query({'a': 5, 'b': True, 'c': "yes"})
+    assert not query({'a': 4, 'b': "no", 'c': "yes"})
 
 
 def test_fragment_with_path():
     query = Query().doc.fragment({'a': 4, 'b': True})
 
-    assert query({'doc': {'a': 4, 'b': True, 'c': 'yes'}})
-    assert not query({'a': 4, 'b': True, 'c': 'yes'})
-    assert not query({'doc': {'a': 4, 'c': 'yes'}})
+    assert query({"doc": {'a': 4, 'b': True, 'c': "yes"}})
+    assert not query({'a': 4, 'b': True, 'c': "yes"})
+    assert not query({"doc": {'a': 4, 'c': "yes"}})
 
 
 def test_get_item():
-    query = Query()['test'] == 1
+    query = Query()["test"] == 1
 
-    assert query({'test': 1})
-    assert not query({'test': 0})
+    assert query({"test": 1})
+    assert not query({"test": 0})

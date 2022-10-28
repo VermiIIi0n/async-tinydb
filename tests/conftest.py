@@ -22,9 +22,8 @@ mods: list = list(product(
 
 
 @pytest.fixture(params=[
-    "memory", "json", "json-encrypted",
-    "json-encrypted-modifier", "json-isolevel0", "json-isolevel1", "json-isolevel2",
-    "json-nocache", "json_extend"] + mods)
+    "memory", "json", "json-encrypted", "json-isolevel0",
+    "json-isolevel1", "json-isolevel2", "json-nocache"] + mods)
 async def db(request):
     with tempfile.TemporaryDirectory() as tmpdir:
         match request.param:
@@ -35,9 +34,6 @@ async def db(request):
             case "json-encrypted":
                 db_ = TinyDB(os.path.join(tmpdir, "test.db"),
                          storage=EncryptedJSONStorage, key=key)
-            case "json-encrypted-modifier":
-                db_ = TinyDB(os.path.join(tmpdir, "test.db"), access_mode="rb+")
-                Modifier.Encryption.AES_GCM(db_, key=key)
             case "json-isolevel0":
                 db_ = TinyDB(os.path.join(tmpdir, "test.db"), isolevel=0)
             case "json-isolevel1":
@@ -48,9 +44,6 @@ async def db(request):
                 db_.isolevel = 2
             case "json-nocache":
                 db_ = TinyDB(os.path.join(tmpdir, "test.db"), no_dbcache=True)
-            case "json_extend":
-                db_ = TinyDB(os.path.join(tmpdir, "test.db"), storage=JSONStorage)
-                Modifier.Conversion.ExtendedJSON(db_)
             case _:
                 if isinstance(request.param, tuple):
                     db_ = TinyDB(os.path.join(tmpdir, "test.db"),

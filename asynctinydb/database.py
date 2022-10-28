@@ -3,8 +3,7 @@ This module contains the main component of TinyDB: the database.
 """
 
 from __future__ import annotations
-from typing import AsyncGenerator, Type, overload, TypeVar, Generic, Any
-
+from typing import AsyncGenerator, Type, overload, TypeVar, Generic
 from .storages import Storage, JSONStorage
 from .middlewares import Middleware
 from .table import Table, Document, IncreID, IDVar, DocVar, BaseDocument
@@ -54,11 +53,11 @@ class TinyDB(Generic[S], TableBase):
         The data is modelled like this::
 
             {
-                'table1': {
+                "table1": {
                     0: {document...},
                     1: {document...},
                 },
-                'table2': {
+                "table2": {
                     ...
                 }
             }
@@ -81,11 +80,6 @@ class TinyDB(Generic[S], TableBase):
     #: .. versionadded:: 4.0
     default_table_name = "_default"
 
-    #: The class that will be used by default to create storage instances
-    #:
-    #: .. versionadded:: 4.0
-    default_storage_class = JSONStorage
-
     @overload
     def __init__(self: TinyDB[S], *args, storage: Type[S], **kw) -> None:
         """For `Storage` classes passed to `storage`"""
@@ -96,7 +90,7 @@ class TinyDB(Generic[S], TableBase):
     def __init__(self: TinyDB[JSONStorage], *args, **kw) -> None:
         """For default `JSONStorage`"""
 
-    def __init__(self, *args, **kw) -> None:
+    def __init__(self, *args, storage=JSONStorage, **kw) -> None:
         """
         Create a new instance of TinyDB.
         * `storage`: The class of the storage to use.
@@ -108,8 +102,7 @@ class TinyDB(Generic[S], TableBase):
         self._no_dbcache: bool = kw.pop("no_dbcache", False)
 
         # Prepare the storage
-        self._storage: S = kw.pop(
-            "storage", type(self).default_storage_class)(*args, **kw)
+        self._storage: S = storage(*args, **kw)
 
         self._opened = True
         self._tables: dict[str, Table] = {}
@@ -198,11 +191,11 @@ class TinyDB(Generic[S], TableBase):
         # TinyDB stores data as a dict of tables like this:
         #
         #   {
-        #       '_default': {
+        #       "_default": {
         #           0: {document...},
         #           1: {document...},
         #       },
-        #       'table1': {
+        #       "table1": {
         #           ...
         #       }
         #   }
@@ -270,6 +263,17 @@ class TinyDB(Generic[S], TableBase):
         await self.storage.write(data)
 
     @property
+    def default_table(self) -> Table[IncreID, Document]:
+        """
+        Get the default table.
+
+        The default table is the table with the name ``"_default"``. If the
+        table does not exist, it will be created.
+        """
+
+        return self.table(self.default_table_name)
+
+    @property
     def storage(self) -> S:
         """
         Get the storage instance used for this TinyDB instance.
@@ -306,8 +310,8 @@ class TinyDB(Generic[S], TableBase):
         To ensure this method is called, the TinyDB instance can be used as a
         context manager::
 
-            async with TinyDB('data.json') as db:
-                await db.insert({'foo': 'bar'})
+            async with TinyDB("data.json") as db:
+                await db.insert({"foo": "bar"})
 
         Upon leaving this context, the ``close`` method will be called.
         """
@@ -340,7 +344,7 @@ class TinyDB(Generic[S], TableBase):
         """
         Forward all unknown attribute calls to the default table instance.
         """
-        return getattr(self.table(self.default_table_name), name)
+        return getattr(self.default_table, name)
 
     # Here we forward magic methods to the default table instance. These are
     # not handled by __getattr__ so we need to forward them manually here
@@ -349,7 +353,7 @@ class TinyDB(Generic[S], TableBase):
         """
         Get the total number of documents in the default table.
 
-        >>> db = TinyDB('db.json')
+        >>> db = TinyDB("db.json")
         >>> len(db)
         0
         """

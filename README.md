@@ -2,13 +2,11 @@
 
 # What's This?
 
-An asynchronous version of `TinyDB`.
+An asynchronous version of `TinyDB` with extended capabilities.
 
 Almost every method is asynchronous. And it's based on `TinyDB 4.7.0+`.  
 
-I will try to keep up with the latest version of `TinyDB`.
-
-
+Unlike `TinyDB` which has a minimal core, `Async-TinyDB` is designed to have max flexibility and performance.
 
 # Incompatible Changes
 
@@ -18,23 +16,23 @@ I will try to keep up with the latest version of `TinyDB`.
 
 * **`ujson`:** Using `ujson` instead of `json`. Some arguments aren't compatible with `json`[^1]
 
-* **Storage `closed` property**: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented[^why-closed][^operating-on-closed].
+* **[Dev-Changes](#dev-changes)**: Changes that only matter to developers (Who customise `Storage`, `Query`, etc).
 
 * **[Miscellaneous](#misc)**: Differences that only matter in edge cases.
 
 # New Features
 
-* **Event Hooks**: You can now use event hooks to hook into an operation. See [Event Hooks](#event-hooks) for more details.
+* **Event Hooks**: You can now use event hooks to hook into an operation. See [Event Hooks](./docs/EventHooks.md) for more details.
 
 * **Redesigned ID & Doc Class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
   
-* **DB-level Caching**: This significantly improves the performance of all operations. However, the responsibility of converting the data to the correct type is transferred to the Storage[^2][^disable-db-level]. 
+* **DB-level Caching**: This significantly improves the performance of all operations. However, it may cause dirty reads with some types of storage [^disable-db-level]. 
 
-* **Built-in `Modifier`**: Use `Modifier` to easily [encrypt](#encryption), [compress](./docs/Modifier.md#Compression) and [extend types](./docs/Modifier.md#Conversion) of your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
+* **Built-in `Modifier`**: Use `Modifier` to easily [compress](./docs/Modifier.md#Compression),  [encrypt](#encryption) and [extend types](./docs/Modifier.md#Conversion) of your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
 
-* **Isolation Level**: Performance or ACID? It's up to you[^isolevel].
+* **Isolation Level**: Performance or thread-safe or even ACID? It's up to you[^isolevel].
 
-* **Atomic Write**: **A**CID!
+* **Atomic Write**: Shipped with `JSONStorage`
 
 * **Batch Search By IDs**: `search` method now takes an extra `doc_ids` argument (works like an additional condition)
 
@@ -50,7 +48,7 @@ I will try to keep up with the latest version of `TinyDB`.
 ## Importing
 
 ```Python
-from asynctinydb import TinyDB, where
+import asynctinydb
 ```
 
 ## Using
@@ -72,7 +70,7 @@ That's it.
 
 **NOTICE: Mixing classes in one table may cause errors!**
 
-When a table exists in a file, `Async-TinyDB` won't determine classes by itself, it is your duty to make sure classes are matching.
+When a table exists in a file, `Async-TinyDB` won't determine its classes by itself, it is your duty to make sure classes are matching.
 
 ### ID Classes
 
@@ -88,7 +86,7 @@ from asynctinydb import TinyDB, UUID, IncreID, Document
 
 db = TinyDB("database.db")
 
-# Setting ID class to UUID, document class to Document
+# Setting ID class to `UUID`, document class to `Document`
 tab = db.table("table1", document_id_class=UUID, document_class=Document)
 ```
 
@@ -116,26 +114,19 @@ _See [Encryption](./docs/Modifier.md#Encryption)_
 
 ## Isolation Level
 
-To avoid blocking codes, Async-TinyDB puts CPU-bound tasks into another thread (Useful with interpreters without GIL)
+When operating the TinyDB concurrently, there might be racing conditions.
 
-Unfortunately, this introduces chances of data being modified when:
-
-* Manipulating mutable objects within `Document` instances in another coroutine
-* Performing updating/saving/searching operations (These operations are run in a different thread/process)
-* The conditions above are satisfied in the same `Table`
-* The conditions above are satisfied simultaneously.
-
-Avoid these operations or set a higher isolation level to mitigate this problem.
+Set a higher isolation level to mitigate this problem.
 
 ```Python
-db.isolevel = 2
+db.isolevel = 1
 ```
 
 `isolevel`:
 
-0. No isolation
-1. Serialised(Atomic) CRUD operations (Also ensures thread safety) (default)
-2. Deepcopy documents on insertion and searching (**CR**UD) (Ensures `Index` & `Query Cache` consistency)
+0. No isolation, best performance.
+1. Serialised(Atomic) CRUD operations. (Also ensures thread safety) (default)
+2. Deepcopy documents on insertion and retrieving. (**CR**UD) (Ensures `Index` & `Query Cache` consistency)
 
 
 
@@ -258,6 +249,12 @@ class BaseDocument(Mapping[IDVar, Any]):
 
 Make sure you have implemented all the methods required by  `BaseDocument` class.
 
+# Dev-Changes
+
+* Storage `closed` property: Original `TinyDB` won't raise exceptions when operating on a closed file. Now the property `closed` of `Storage` classes is required to be implemented[^why-closed][^operating-on-closed].
+* Storage data converting: The responsibility of converting the data to the correct type is transferred to the Storage[^2]
+* `is_cacheable` method in `QueryInstance` is changed to `cacheable` property and will be deprecated.
+
 # Misc
 
 * Lazy-load: File loading & dirs creating are delayed to the first IO operation.
@@ -266,7 +263,7 @@ Make sure you have implemented all the methods required by  `BaseDocument` class
 * `search` accepts optional `cond`, returns all docs if no arguments are provided
 * `get` and `contains` raises `ValueError` instead of `RuntimeError` when `cond` and `doc_id` are both `None`
 * `LRUCache` stores `tuple`s of ids instead of `list`s of docs
-* `search` and `get` treat `doc_id` and `doc_ids` as extra conditions instead of ignoring conditions when they are provided. That is to say, when `cond` and `doc_id(s)` are passed, they return docs satisfies both `cond` and `doc_id(s)`.
+* `search` and `get` treat `doc_id` and `doc_ids` as extra conditions instead of ignoring conditions when IDs are provided. That is to say, when `cond` and `doc_id(s)` are passed, they return docs satisfies `cond` and is in `doc_id(s)`.
 
 
 
@@ -275,6 +272,6 @@ Make sure you have implemented all the methods required by  `BaseDocument` class
 [^UUID-version]:Currently using UUID4
 [^disable-db-level]: See [DB-level caching](#db-level-caching) to learn how to disable this feature if it causes dirty reads.
 [^isolevel]: See [isolevel](#isolation-level)
-[^why-closed]: This is for `Middileware` classes to reliably determine whether the `Storage` is closed, so they can raise `IOError`
-[^operating-on-closed]: An `IOError` should be raised when operating on a closed storage.
+[^why-closed]: This is for `Middleware` classes to reliably determine whether the `Storage` is closed, so they can raise `IOError`
+[^operating-on-closed]: An `IOError` should be raised when operating on closed storage.
 

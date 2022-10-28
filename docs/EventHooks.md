@@ -4,19 +4,147 @@ Event Hooks give you more flexibility than middleware.
 
 For example, you can achieve compress/decompress data without creating a new Storage class.
 
-`Modifier` heavily uses event hooks.
+It is the low-level API for `Modifier` and `Index`
 
-Currently only supports json storage events: `write.pre`, `write.post`, `read.pre`, `read.post`, `close`.
+## Storage Events
 
-* `write.pre` is called before json dumping, args: `str`(event name), `Storage`, `dict`(data).  
-  Return non `None` value will overwrite data to be saved[^1].
-* `write.post` is called after json dumping, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).  
-  Return non `None` value will overwrite data to be saved[^1].
-* `read.pre` is called before json loading, args: `str`(event name), `Storage`, `str|bytes`(json str or bytes).  
-  Return non `None` value will overwrite data to be read. **Actions executed in reversed order**
-* `read.post` is called after json loading, args: `str`(event name), `Storage`, `dict`(data).  
-  Return non `None` value will overwrite data to be read. **Actions executed in reversed order**
-* `close` is called when the storage is closed, args: `str`(event name), `Storage`.
+### `write.pre`
+Called before json dumping
+* `ChainType`: `ActionCentipede`
+* `ActionType`: `async`
+#### args
+* `str`(event name)
+* `Storage`(storage)
+* `dict`(data)
+
+#### return
+* `None` or `dict`(data)
+
+Return any non-None value will overwrite data to be saved.
+### `write.post`
+Called after json dumping
+* `ChainType`: `ActionCentipede`
+* `ActionType`: `async`
+
+#### args
+* `str`(event name)
+* `Storage`(storage)
+* `str|bytes`(json str or bytes)
+
+#### return
+* `None` or `str|bytes`(json str or bytes)
+
+Return any non-None value will overwrite data to be saved.
+
+### `read.pre`
+Called before json loading
+**Executed in reversed order**
+* `ChainType`: `ActionCentipede`
+* `ActionType`: `async`
+
+#### args
+* `str`(event name)
+* `Storage`(storage)
+* `str|bytes`(json str or bytes)
+
+#### return
+* `None` or `str|bytes`(json str or bytes)
+
+Return any non-None value will overwrite data to be read.
+
+### `read.post`
+Called after json loading
+**Executed in reversed order**
+* `ChainType`: `ActionCentipede`
+* `ActionType`: `async`
+
+#### args
+* `str`(event name)
+* `Storage`(storage)
+* `dict`(data)
+
+#### return
+* `None` or `dict`(data)
+
+### `close`
+Called when storage is closed
+* `ChainType`: `ActionChain`
+* `ActionType`: `async`
+
+#### args
+* `str`(event name)
+* `Storage`(storage)
+
+#### return
+* `None`
+
+Return any non-None value will overwrite data to be read.
+## Table Events
+### `create`
+Called when a document is created
+* `ChainType`: `ActionChain`
+* `ActionType`: `sync`
+
+#### args
+* `str`(event name)
+* `Table`(table)
+* `BaseDocument`(document)
+
+#### return
+* `None`
+
+### `read`
+Called when a document is read
+* `ChainType`: `ActionChain`
+* `ActionType`: `sync`
+
+#### args
+* `str`(event name)
+* `Table`(table)
+* `BaseDocument`(document)
+
+#### return
+* `None`
+
+### `update`
+Called when a document is updated
+* `ChainType`: `ActionChain`
+* `ActionType`: `sync`
+
+#### args
+* `str`(event name)
+* `Table`(table)
+* `BaseDocument`(document)
+
+#### return
+* `None`
+
+### `delete`
+Called when a document is deleted
+* `ChainType`: `ActionChain`
+* `ActionType`: `sync`
+
+#### args
+* `str`(event name)
+* `Table`(table)
+* `BaseDocument`(document)
+
+#### return
+* `None`
+
+### `truncate`
+Called when a table is truncated
+* `ChainType`: `ActionChain`
+* `ActionType`: `sync`
+
+#### args
+* `str`(event name)
+* `Table`(table)
+
+#### return
+* `None`
+
+## Event Hooks Example
 
 ```Python
 s = Storage()
@@ -25,8 +153,6 @@ s = Storage()
 async def f(ev, s, data):  # Will be executed on event `write.pre`
   ...
 ```
-
-## Event Hooks Example
 
 ```Python
 async def main():
@@ -39,7 +165,7 @@ async def main():
     @db.storage.on.write.post
     async def _print(ev, s, anystr):
       	print(anystr)  # print json dumped string
-        # No return value or return None will not affect data
+        # No return value or return None will not affect tdata
  
     await db.insert({"answer": 21})  # insert() will trigger both write events
     await db.close()
