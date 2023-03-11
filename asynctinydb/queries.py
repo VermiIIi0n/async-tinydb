@@ -38,7 +38,7 @@ def is_cacheable(q: QueryLike) -> bool:
     if hasattr(q, "is_cacheable"):
         warn("`is_cacheable()` is deprecated, use `cacheable` instead",
              DeprecationWarning)
-        return q.is_cacheable()  # type: ignore
+        return q.is_cacheable()
     warn("QueryLike should have a `cacheable` property", DeprecationWarning)
     return True
 

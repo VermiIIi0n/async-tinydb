@@ -6,14 +6,17 @@ from __future__ import annotations
 import io
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar, cast
+from typing import TypeAlias
 import os
 from tempfile import NamedTemporaryFile
 import ujson as json
-from .event_hooks import EventHook, ActionChain, EventHint, ActionCentipede
-from .event_hooks import AsyncActionType
-from .utils import AsinkRunner, stringfy_keys
+from vermils.react import EventHook, ActionChain, EventHint, ActionCentipede
+from vermils.asynctools import AsinkRunner
+from vermils.gadgets import stringify_keys
 
 __all__ = ("Storage", "JSONStorage", "MemoryStorage")
+
+AsyncActionType: TypeAlias = Callable[..., Awaitable[None]]
 
 
 def touch(path: str, create_dirs: bool) -> None:
@@ -215,7 +218,7 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
                    await self._event_hook.aemit("write.pre", self, data))
         data = pre if pre is not None else data
         # Convert keys to strings
-        data = await self._sink.run(stringfy_keys, data)
+        data = await self._sink.run(stringify_keys, data)
 
         # Serialize the database state using the user-provided arguments
         task = self._sink.run(json.dumps, data or {}, **self.kwargs)
@@ -364,13 +367,13 @@ _C = TypeVar("_C", bound=Callable[[str, Storage], Awaitable[None]])
 
 class _write_hint(EventHint):
     @property
-    def pre(self) -> Callable[[_D], _D]:
+    def pre(self) -> Callable[[_D], _D]:  # type: ignore
         """
         Action Type: (event_name: str, Storage, 
         data: dict[str, dict]) -> None
         """
     @property
-    def post(self) -> Callable[[_S], _S]:
+    def post(self) -> Callable[[_S], _S]:  # type: ignore
         """
         Action Type: (event_name: str, Storage, 
         data: str|bytes) -> str|bytes|None
@@ -379,13 +382,13 @@ class _write_hint(EventHint):
 
 class _read_hint(EventHint):
     @property
-    def pre(self) -> Callable[[_S], _S]:
+    def pre(self) -> Callable[[_S], _S]:  # type: ignore
         """
         Action Type: (event_name: str, Storage, 
         data: str|bytes) -> str|bytes|None
         """
     @property
-    def post(self) -> Callable[[_D], _D]:
+    def post(self) -> Callable[[_D], _D]:  # type: ignore
         """
         Action Type: (event_name: str, Storage, 
         data: dict[str, dict]) -> None

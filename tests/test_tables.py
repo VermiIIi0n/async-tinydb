@@ -3,7 +3,7 @@ import re
 import pytest
 import datetime as dt
 from asynctinydb import where, Modifier
-from asynctinydb.event_hooks import EventHook
+from vermils.react import EventHook
 from asynctinydb.database import TinyDB
 from asynctinydb.storages import MemoryStorage
 from asynctinydb.table import UUID, Document

@@ -51,9 +51,9 @@ Unlike `TinyDB` which has a minimal core, `Async-TinyDB` is designed to have max
 import asynctinydb
 ```
 
-## Using
+## Usage
 
-See the [original `TinyDB` documents](https://tinydb.readthedocs.org). Insert an `await` in front of async methods. 
+Read the [original `TinyDB` documents](https://tinydb.readthedocs.org). Insert an `await` in front of async methods. 
 
 Notice that some codes are still blocking, for example, when calling `len()` on `TinyDB` or `Table` Objects.
 

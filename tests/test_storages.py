@@ -359,13 +359,13 @@ async def test_storage_event_hooks(tmpdir):
     assert closed
 
     # Should raise an error because this event doesn't exist
-    with pytest.raises(AttributeError):
+    with pytest.raises(KeyError):
         @storage.on.read.not_a_event
         async def r(*arg):
             ...
 
     ms = MemoryStorage()
-    with pytest.raises(AttributeError):
+    with pytest.raises(KeyError):
         @ms.on.read.not_a_event
         async def r(*arg):
             ...

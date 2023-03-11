@@ -6,7 +6,9 @@ import datetime as dt
 from warnings import warn
 from functools import partial
 from .storages import Storage, StorageWithWriteReadPrePostHooks
-from .utils import async_run, FrozenDict, sort_class
+from vermils.asynctools import async_run
+from vermils.collections.fridge import FrozenDict
+from vermils.gadgets import sort_class
 from .database import TinyDB
 from .table import Table, IncreID, Document, BaseDocument
 

@@ -7,7 +7,8 @@ from typing import AsyncGenerator, Type, overload, TypeVar, Generic
 from .storages import Storage, JSONStorage
 from .middlewares import Middleware
 from .table import Table, Document, IncreID, IDVar, DocVar, BaseDocument
-from .utils import with_typehint, sync_await
+from .utils import with_typehint
+from vermils.asynctools import sync_await
 
 # The table's base class. This is used to add type hinting from the Table
 # class to TinyDB. Currently, this supports PyCharm, Pyright/VS Code and MyPy.

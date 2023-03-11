@@ -13,10 +13,10 @@ from typing import AsyncGenerator, Collection, MutableMapping
 from typing import overload, Callable, Iterable
 from typing import Mapping, Generic, cast, TypeVar, Type, Any, ParamSpec
 from .queries import QueryLike, is_cacheable
-from .event_hooks import EventHook, EventHint, ActionChain
+from vermils.react import EventHook, EventHint, ActionChain
 from .storages import Storage
-from .utils import LRUCache, sync_await, AsinkRunner
-from .utils import async_run
+from .utils import LRUCache
+from vermils.asynctools import sync_await, AsinkRunner, async_run
 
 __all__ = ("Document", "Table", "IncreID")
 IDVar = TypeVar("IDVar", bound="BaseID")
@@ -865,7 +865,7 @@ class Table(Generic[IDVar, DocVar]):
         complete database data, but not modifying only portions of it. Thus,
         to only update portions of the table data, we first perform a read
         operation, perform the update on the table data and then write
-        the updated data back to the storage.
+        the updated data back to the storage. 
 
         As a further optimization, we don't convert the documents into the
         document class, as the table data will *not* be returned to the user.
