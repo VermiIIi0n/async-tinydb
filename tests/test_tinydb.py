@@ -875,3 +875,62 @@ async def test_timestamp(tmpdir):
     async with db:
         _id = await db.insert({"foo": "bar"})
         assert (await db.get(doc_id=_id))["created"]
+
+
+async def test_LRUCache(tmpdir):
+    db = TinyDB(tmpdir / "db.json", storage=JSONStorage)
+    Modifier.Caching.LRUCache(db, maxsize=2)
+    async with db:
+        _id1 = await db.insert({"foo": "bar"})
+        _id2 = await db.insert({"foo": "baz"})
+        _id3 = await db.insert({"foo": "qux"})
+
+        assert await db.get(doc_id=_id1) is None
+        assert len(db.default_table) == 2
+        assert await db.get(doc_id=_id2) == {"foo": "baz"}
+        assert await db.get(doc_id=_id3) == {"foo": "qux"}
+        await db.get(doc_id=_id2)
+        await db.insert({"foo": "quux"})
+        assert await db.get(doc_id=_id2) == {"foo": "baz"}
+        assert await db.get(doc_id=_id3) is None
+    
+    db = TinyDB(tmpdir / "db.json", storage=JSONStorage)
+    async with db:
+        Modifier.Caching.LRUCache(db, maxsize=0)
+
+        with pytest.raises(ValueError, match="too large"):
+            await db.insert({"foo": "bar"})
+
+async def test_MRUCache(tmpdir):
+    db = TinyDB(tmpdir / "db.json", storage=JSONStorage)
+    Modifier.Caching.MRUCache(db, maxsize=2)
+    async with db:
+        _id1 = await db.insert({"foo": "bar"})
+        _id2 = await db.insert({"foo": "baz"})
+        _id3 = await db.insert({"foo": "qux"})
+    
+
+        assert len(db.default_table) == 2
+        assert await db.get(doc_id=_id2) is None
+        assert await db.get(doc_id=_id3) == {"foo": "qux"}
+        assert await db.get(doc_id=_id1) == {"foo": "bar"}
+
+        await db.insert({"foo": "quux"})
+        assert await db.get(doc_id=_id1) is None
+
+async def test_FIFOCache(tmpdir):
+    db = TinyDB(tmpdir / "db.json", storage=JSONStorage)
+    Modifier.Caching.FIFOCache(db, maxsize=2)
+    async with db:
+        _id1 = await db.insert({"foo": "bar"})
+        _id2 = await db.insert({"foo": "baz"})
+        _id3 = await db.insert({"foo": "qux"})
+
+        assert len(db.default_table) == 2
+        assert await db.get(doc_id=_id1) is None
+        assert await db.get(doc_id=_id2) == {"foo": "baz"}
+        assert await db.get(doc_id=_id3) == {"foo": "qux"}
+        await db.get(doc_id=_id2)
+        await db.insert({"foo": "quux"})
+        assert await db.get(doc_id=_id2) is None
+        assert await db.get(doc_id=_id3) == {"foo": "qux"}

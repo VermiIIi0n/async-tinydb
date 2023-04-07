@@ -112,7 +112,6 @@ class IncreID(int, BaseID):
 
 class UUID(uuid.UUID, BaseID):
     """ID class using uuid4 UUIDs."""
-    _cache: dict[str, set[uuid.UUID]] = {}
 
     def __init__(self, value: str | uuid.UUID):  # skipcq: PYL-W0231
         super().__init__(str(value))
@@ -122,24 +121,15 @@ class UUID(uuid.UUID, BaseID):
 
     @classmethod
     def next_id(cls, table: Table, keys: Collection[UUID]) -> UUID:
-        if table.name not in cls._cache:
-            cls._cache[table.name] = set()
-        while True:
-            new_id = cls(uuid.uuid4())
-            if (new_id not in cls._cache[table.name]  # pragma: no branch
-                    and new_id not in keys):
-                cls._cache[table.name].add(new_id)
-                return new_id
+        return cls(uuid.uuid4())
 
     @classmethod
     def mark_existed(cls, table: Table, new_id: UUID):
-        cache = cls._cache.get(table.name, set())
-        cache.add(new_id)
-        cls._cache[table.name] = cache
+        ...
 
     @classmethod
     def clear_cache(cls, table: Table):
-        cls._cache.pop(table.name, None)
+        ...
 
 
 class BaseDocument(MutableMapping[IDVar, Any]):
@@ -251,7 +241,7 @@ class Table(Generic[IDVar, DocVar]):
         """Whether to disable the DB-level cache for this table."""
         self._storage = storage
         self._name = name
-        self._cache: dict[IDVar, DocVar] = None  # type: ignore
+        self._cache: MutableMapping[IDVar, DocVar] = None  # type: ignore[assignment]
         """Cache for documents in this table."""
         self._query_cache: LRUCache[QueryLike, tuple[IDVar, ...]] \
             = self.query_cache_class(capacity=cache_size)
@@ -322,7 +312,7 @@ class Table(Generic[IDVar, DocVar]):
 
         doc_id: IDVar = None  # type: ignore
 
-        def updater(table: dict[IDVar, DocVar]):
+        def updater(table: MutableMapping[IDVar, DocVar]):
             # Now, we update the table and add the document
             nonlocal doc_id
             nonlocal document
@@ -364,7 +354,7 @@ class Table(Generic[IDVar, DocVar]):
 
         doc_ids = []
 
-        def updater(table: dict[IDVar, DocVar]):
+        def updater(table: MutableMapping[IDVar, DocVar]):
             existing_keys = table.keys()
             for document in documents:
 
@@ -480,7 +470,7 @@ class Table(Generic[IDVar, DocVar]):
 
     async def update(
         self,
-        fields: Mapping | Callable[[Mapping], None],
+        fields: Mapping | Callable[[MutableMapping], None],
         cond: QueryLike = None,
         doc_ids: Iterable[IDVar] = None,
     ) -> list[IDVar]:
@@ -496,12 +486,12 @@ class Table(Generic[IDVar, DocVar]):
 
         # Define the function that will perform the update
         if callable(fields):
-            def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
+            def perform_update(table: MutableMapping[IDVar, DocVar], doc_id: IDVar):
                 # Update documents by calling the update function provided by
                 # the user
                 fields(table[doc_id])  # type: ignore
         else:
-            def perform_update(table: dict[IDVar, DocVar], doc_id: IDVar):
+            def perform_update(table: MutableMapping[IDVar, DocVar], doc_id: IDVar):
                 nonlocal fields
                 if self._isolevel >= 2:
                     fields = deepcopy(fields)
@@ -513,7 +503,7 @@ class Table(Generic[IDVar, DocVar]):
 
         updated_ids = []
 
-        def updater(table: dict[IDVar, DocVar]):
+        def updater(table: MutableMapping[IDVar, DocVar]):
             # Process all documents
             for doc_id in ids:
                 # Add ID to list of updated documents
@@ -543,7 +533,7 @@ class Table(Generic[IDVar, DocVar]):
 
         # Define the function that will perform the update
         def perform_update(fields: Callable[[Mapping], None] | Mapping,
-                           table: dict[IDVar, DocVar], doc_id: IDVar):
+                           table: MutableMapping[IDVar, DocVar], doc_id: IDVar):
             if callable(fields):
                 # Update documents by calling the update function provided
                 # by the user
@@ -560,7 +550,7 @@ class Table(Generic[IDVar, DocVar]):
         # Collect affected doc_ids
         updated_ids = []
 
-        def updater(table: dict[IDVar, DocVar]):
+        def updater(table: MutableMapping[IDVar, DocVar]):
             # We need to convert the keys iterator to a list because
             # we may remove entries from the ``table`` dict during
             # iteration and doing this without the list conversion would
@@ -645,7 +635,7 @@ class Table(Generic[IDVar, DocVar]):
         docs = await self.search(cond, doc_ids=doc_ids)
         ids = [doc.doc_id for doc in docs]
 
-        def rm_updater(table: dict[IDVar, DocVar]):
+        def rm_updater(table: MutableMapping[IDVar, DocVar]):
             for doc_id in ids:
                 # Other threads may have already removed the document
                 with suppress(KeyError):
@@ -752,7 +742,7 @@ class Table(Generic[IDVar, DocVar]):
         self._sink.close()
 
     def _search(self, cond: QueryLike | None,
-                docs: dict[IDVar, DocVar],
+                docs: MutableMapping[IDVar, DocVar],
                 limit: int | None,
                 doc_ids: Iterable[IDVar] | None) -> dict[IDVar, DocVar]:
         limit = len(docs) if limit is None else limit
@@ -807,9 +797,13 @@ class Table(Generic[IDVar, DocVar]):
 
         # deepcopy if isolation level is >= 2
         # otherwise return shallow copy in case of no sieve been applied
+        # ps: sieves will perform a shallow copy.
+        if not isinstance(docs, dict):
+            docs = dict(docs)
+
         return deepcopy(docs) if self._isolevel >= 2 else docs.copy()
 
-    async def _read_table(self) -> dict[IDVar, DocVar]:
+    async def _read_table(self) -> MutableMapping[IDVar, DocVar]:
         """
         Read the table data from the underlying storage 
         if cache is not exist.
@@ -823,20 +817,20 @@ class Table(Generic[IDVar, DocVar]):
         raw = await self._read_raw_table()
         cooked: dict[IDVar, DocVar] | None = None
 
-        def cook():
-            nonlocal cooked
-            doc_cls = self.document_class
-            id_cls = self.document_id_class
-            cooked = {
-                id_cls(doc_id): doc_cls(rdoc, doc_id=id_cls(doc_id))
-                for doc_id, rdoc in raw.items()
-            }
-            if not self.no_dbcache:
-                # Caching if no_dbcache is not set
-                self._cache = cooked
+        cooked = await self._run_with_iso(self._cook, raw)
+        if not self.no_dbcache:
+            # Caching if no_dbcache is not set
+            self._cache = cooked
+        return cooked
 
-        await self._run_with_iso(cook)
-        return self._cache or cooked
+    def _cook(self, raw: Mapping[Any, Mapping]
+              ) -> MutableMapping[IDVar, DocVar]:
+        doc_cls = self.document_class
+        id_cls = self.document_id_class
+        return {
+            id_cls(doc_id): doc_cls(rdoc, doc_id=id_cls(doc_id))
+            for doc_id, rdoc in raw.items()
+        }
 
     async def _read_raw_table(self) -> MutableMapping[Any, Mapping]:
         """
@@ -857,7 +851,8 @@ class Table(Generic[IDVar, DocVar]):
         # Retrieve the current table's data
         return tables.get(self.name, {})
 
-    async def _update_table(self, updater: Callable[[dict[IDVar, DocVar]], None]):
+    async def _update_table(self,
+                            updater: Callable[[MutableMapping[IDVar, DocVar]], None]):
         """
         Perform a table update operation.
 

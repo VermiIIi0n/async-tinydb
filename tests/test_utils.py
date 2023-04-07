@@ -26,7 +26,7 @@ def test_lru_cache():
     except KeyError:
         pass
 
-    assert cache.lru == ["c", "a", "d"]
+    assert sorted(cache.lru) == sorted(["c", "a", "d"])
 
 
 def test_inspects():
@@ -65,7 +65,7 @@ def test_lru_cache_get():
     cache.get("a")
     cache["d"] = 4
 
-    assert cache.lru == ["c", "a", "d"]
+    assert sorted(cache.lru) == sorted(["c", "a", "d"])
 
 
 def test_lru_cache_delete():

@@ -1,16 +1,19 @@
 """Modifier class for TinyDB."""
 
 from __future__ import annotations
-from typing import Any, Callable, TypeVar, overload
+import time
+from typing import Any, Callable, Mapping, Sequence, TypeVar, overload
 import datetime as dt
+import cachetools
 from warnings import warn
 from functools import partial
-from .storages import Storage, StorageWithWriteReadPrePostHooks
+from cachetools import Cache
 from vermils.asynctools import async_run
 from vermils.collections.fridge import FrozenDict
 from vermils.gadgets import sort_class
+from .storages import Storage, StorageWithWriteReadPrePostHooks
 from .database import TinyDB
-from .table import Table, IncreID, Document, BaseDocument
+from .table import BaseID, Table, IncreID, Document, BaseDocument
 
 
 T = TypeVar("T", bound=Table)
@@ -416,4 +419,171 @@ class Modifier:
                 def access_time(_: str, tab: Table, doc: BaseDocument):
                     doc[fields["access"]] = get_time()
 
+            return tab
+
+    class Caching:
+        """
+        ## Bounded Caching
+
+        **WARNING: This is NOT CachingMiddleware, it will PURGE data in the database
+        that expires. 
+        If you want to cache your data for performance, use `CachingMiddleware` instead.**
+
+        ** Note modifiers in this class are still UNDER DEVELOPMENT, current implementation
+        is flawed and only works well if you access the data using `doc_id`. Conditional
+        searching/updating will mess up with the cache order, you may purge incorrect data.**
+
+        This class provides modifiers that turn TinyDB instances into cache system
+        with a bounded size.
+
+        You can choose algorithms such as `LRUCache`, `LFUCache`...
+        Or even implement your own.
+
+        """
+
+        @staticmethod
+        def _add_cache(
+                tab: Table | TinyDB,
+                cacheT: type[Cache],
+                maxsize: int,
+                getsizeof: Callable[[Any], float] | None,
+                **kw):
+
+            if isinstance(tab, TinyDB):
+                tab = tab.default_table
+            tab._cook
+            if tab.no_dbcache:
+                raise ValueError("Modifier relies on db-level cache")
+
+            def _cook(raw: Mapping[Any, Mapping]
+                      ) -> Cache[BaseID, BaseDocument]:
+                nonlocal tab
+                doc_cls = tab.document_class
+                id_cls = tab.document_id_class
+                cache = cacheT(
+                    maxsize=maxsize,
+                    getsizeof=getsizeof,
+                    **kw)
+                for rid, rdoc in raw.items():
+                    doc_id = id_cls(rid)
+                    doc = doc_cls(rdoc, doc_id)
+                    cache[doc_id] = doc
+                return cache
+
+            tab._cook = _cook  # type: ignore[method-assign]
+
+        @classmethod
+        def LRUCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                getsizeof: Callable[[Any], float] = None,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### LRUCache
+            Least Recently Used Cache
+            """
+            cls._add_cache(tab, cachetools.LRUCache, maxsize, getsizeof)
+            return tab
+
+        @classmethod
+        def LFUCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                getsizeof: Callable[[Any], float] = None,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### LFUCache
+            Least Frequently Used Cache
+            """
+            cls._add_cache(tab, cachetools.LFUCache, maxsize, getsizeof)
+            return tab
+
+        @classmethod
+        def RRCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                getsizeof: Callable[[Any], float] = None,
+                choice: Callable[[Sequence], Any] = None,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### RRCache
+            Random Replacement Cache
+            """
+            cls._add_cache(tab, cachetools.RRCache, maxsize, getsizeof,
+                           choice=choice)
+            return tab
+
+        @classmethod
+        def TTLCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                ttl: float,
+                getsizeof: Callable[[Any], float] = None,
+                timer: Callable[[], float] = time.monotonic,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### TTLCache
+            Time To Live Cache
+            """
+            cls._add_cache(tab, cachetools.TTLCache, maxsize, getsizeof,
+                           ttl=ttl, timer=timer)
+            return tab
+
+        @classmethod
+        def TLRUCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                ttu: Callable[[Any, Any, float], float],
+                getsizeof: Callable[[Any], float] = None,
+                timer: Callable[[], float] = time.monotonic,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### TLRUCache
+            Time To Live Least Recently Used Cache
+
+            ```
+            from datetime import datetime, timedelta
+
+            def my_ttu(_key, value, now):
+                # assume value.ttl contains the item's time-to-live in hours
+                return now + timedelta(hours=value.ttl)
+
+            cache = TLRUCache(maxsize=10, ttu=my_ttu, timer=datetime.now)
+            ```
+            """
+            cls._add_cache(tab, cachetools.TLRUCache, maxsize, getsizeof,
+                           ttu=ttu, timer=timer)
+            return tab
+
+        @classmethod
+        def FIFOCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                getsizeof: Callable[[Any], float] = None,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### FIFOCache
+            First In First Out Cache
+            """
+            cls._add_cache(tab, cachetools.FIFOCache, maxsize, getsizeof)
+            return tab
+
+        @classmethod
+        def MRUCache(
+                cls,
+                tab: Table | TinyDB,
+                maxsize: int,
+                getsizeof: Callable[[Any], float] = None,
+        ) -> Table[BaseID, BaseDocument]:
+            """
+            ### MRUCache
+            Most Recently Used Cache
+            """
+            cls._add_cache(tab, cachetools.MRUCache, maxsize, getsizeof)
             return tab

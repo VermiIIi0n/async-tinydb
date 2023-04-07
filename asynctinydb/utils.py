@@ -5,9 +5,11 @@ Utility functions.
 from __future__ import annotations
 from collections import OrderedDict
 from contextlib import suppress
-from typing import Iterator, TypeVar, Generic, Type, \
-    TYPE_CHECKING, Callable,  MutableMapping
+from typing import Any, Iterator, TypeVar, Generic, Type, \
+    TYPE_CHECKING, Callable
 
+from contextlib import suppress
+from cachetools import LRUCache as _LRUCache
 from vermils.collections.fridge import FrozenDict, FrozenList, freeze
 from vermils.collections.strchain import StrChain
 from vermils.gadgets import mimics, sort_class, stringify_keys, supports_in
@@ -26,7 +28,8 @@ C = TypeVar("C", bound=Callable)
 __all__ = (("LRUCache", "freeze", "with_typehint", "stringify_keys",
             "supports_in", "is_container", "is_iterable", "is_hashable",
             "StrChain", "FrozenDict", "mimics", "sort_class", "FrozenList",
-            ) + _async_tools_all)
+            ) + _async_tools_all
+           )
 
 
 def with_typehint(baseclass: Type[T]):
@@ -66,7 +69,7 @@ def is_container(obj) -> bool:
     return hasattr(obj, "__contains__")
 
 
-class LRUCache(MutableMapping, Generic[K, V]):
+class LRUCache(_LRUCache, Generic[K, V]):
     """
     A least-recently used (LRU) cache with a fixed cache size.
 
@@ -74,68 +77,22 @@ class LRUCache(MutableMapping, Generic[K, V]):
     entries in the cache exceeds the cache size, the least-recently accessed
     entry will be discarded.
 
-    This is implemented using an ``OrderedDict``. On every access the accessed
-    entry is moved to the front by re-inserting it into the ``OrderedDict``.
-    When adding an entry and the cache size is exceeded, the last entry will
-    be discarded.
+    This is implemented uses the ``cachetools`` package.
     """
 
-    def __init__(self, capacity=None) -> None:
-        self.capacity = capacity
-        self.cache: OrderedDict[K, V] = OrderedDict()
+    def __init__(self, capacity=None,
+                 getsizeof: Callable[[Any], int] = None) -> None:
+        capacity = float("inf") if capacity is None else capacity
+        super().__init__(maxsize=capacity, getsizeof=getsizeof)
 
     @property
     def lru(self) -> list[K]:
-        return list(self.cache.keys())
+        return list(self.keys())
 
     @property
     def length(self) -> int:
-        return len(self.cache)
-
-    def clear(self) -> None:
-        self.cache.clear()
-
-    def __len__(self) -> int:
-        return self.length
-
-    def __contains__(self, key: object) -> bool:
-        return key in self.cache
+        return len(self)
 
     def __setitem__(self, key: K, value: V) -> None:
-        self.set(key, value)
-
-    def __delitem__(self, key: K) -> None:
-        del self.cache[key]
-
-    def __getitem__(self, key) -> V:
-        value = self.get(key)
-        if value is None:
-            raise KeyError(key)
-
-        return value
-
-    def __iter__(self) -> Iterator[K]:
-        return iter(self.cache)
-
-    def get(self, key: K, default: D = None) -> V | D | None:
-        value = self.cache.get(key)
-
-        if value is not None:
-            self.cache.move_to_end(key, last=True)
-
-            return value
-
-        return default
-
-    def set(self, key: K, value: V):
-        if self.cache.get(key):
-            self.cache.move_to_end(key, last=True)
-
-        else:
-            self.cache[key] = value
-
-            # Check, if the cache is full and we have to remove old items
-            # If the queue is of unlimited size, self.capacity is NaN and
-            # x > NaN is always False in Python and the cache won't be cleared.
-            if self.capacity is not None and self.length > self.capacity:
-                self.cache.popitem(last=False)
+        with suppress(ValueError):
+            super().__setitem__(key, value)
