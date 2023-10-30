@@ -75,7 +75,7 @@ class IncreID(int, BaseID):
     __init__ = int.__init__
 
     def __hash__(self):
-        return hash(int(self))
+        return int.__hash__(self)
 
     @classmethod
     def next_id(cls, table: Table, keys: Collection[IncreID]) -> IncreID:
@@ -109,6 +109,26 @@ class IncreID(int, BaseID):
     def clear_cache(cls, table: Table):
         cls._cache.pop(table.name, None)
 
+
+class StrID(str, BaseID):
+    """ID class using strings."""
+
+    __init__ = str.__init__
+
+    def __hash__(self):
+        return str.__hash__(self)
+
+    @classmethod
+    def next_id(cls, table: Table, keys: Collection[StrID]) -> StrID:
+        return cls(uuid.uuid4().hex)
+
+    @classmethod
+    def mark_existed(cls, table: Table, new_id: StrID):
+        ...
+
+    @classmethod
+    def clear_cache(cls, table: Table):
+        ...
 
 class UUID(uuid.UUID, BaseID):
     """ID class using uuid4 UUIDs."""
