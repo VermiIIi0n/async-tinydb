@@ -29,7 +29,7 @@ def _get_storage(item: S | TinyDB[S]) -> S:
 
 
 @overload
-def _get_table(item: TinyDB) -> Table[IncreID, Document]: ...  # type: ignore[misc]
+def _get_table(item: TinyDB) -> Table[IncreID, Document]: ...  # type: ignore[overload-overlap]
 @overload
 def _get_table(item: T) -> T: ...
 
@@ -78,7 +78,7 @@ class Modifier:
             @s.on.write.post
             async def encrypt_aes_gcm(_: str, s: Storage, data: str | bytes):
                 nonlocal dtype
-                cipher: GcmMode = AES.new(key, **kw)  # type: ignore
+                cipher: GcmMode = AES.new(key, **kw)
                 if isinstance(data, str):
                     dtype = str
                     data = data.encode("utf-8")
@@ -93,7 +93,7 @@ class Modifier:
             async def decrypt_aes_gcm(_: str, s: Storage, data: bytes):
                 d_len = data[0]  # digest length
                 digest = data[1: d_len + 1]
-                cipher: GcmMode = AES.new(key,  # type: ignore
+                cipher: GcmMode = AES.new(key,
                                           nonce=data[d_len + 1:d_len + 17], **kw)
                 data = data[d_len + 17:]
                 task = async_run(cipher.decrypt_and_verify, data, digest)

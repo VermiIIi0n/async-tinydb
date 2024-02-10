@@ -202,7 +202,7 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
         raw = pre if pre is not None else raw or "{}"
 
         # Deserialize the data
-        data = await self._sink.run(json.loads, raw)  # type: ignore
+        data = await self._sink.run(json.loads, raw)
 
         # Post-process data
         post = await self._event_hook.aemit("read.post", self, data)

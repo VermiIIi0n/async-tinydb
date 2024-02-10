@@ -387,7 +387,7 @@ class Query(QueryInstance):
             if not isinstance(value, str):
                 return False
 
-            return regex.match(value) is not None  # type: ignore[union-attr]
+            return regex.match(value) is not None
 
         return self._generate_test(test, ("matches", self._path, regex), True)
 
@@ -409,7 +409,7 @@ class Query(QueryInstance):
             if not isinstance(value, str):
                 return False
 
-            return regex.search(value) is not None  # type: ignore[union-attr]
+            return regex.search(value) is not None
 
         return self._generate_test(test, ("search", self._path, regex), True)
 

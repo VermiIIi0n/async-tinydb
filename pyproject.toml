@@ -36,6 +36,9 @@ packages = [
 ]
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.2"
+types-ujson = "^5.9.0.0"
+types-cachetools = "^5.3.0.7"
+py = "^1.11.0"
 
 
 [tool.pytest.ini_options]
@@ -91,10 +94,8 @@ ujson = "^5.4.0"
 pycryptodome = {version = "^3.15.0", optional = true}
 Brotli = {version = "^1.0.9", optional = true}
 blosc2 = {version = "^0.4.1", optional = true}
-types-ujson = "^5.5.0"
 vermils = "^0.3.0"
 cachetools = "^5.3.0"
-types-cachetools = "^5.3.0.5"
 
 [tool.poetry.extras]
 encryption = ["pycryptodome"]
@@ -102,17 +103,19 @@ compression = ["Brotli", "blosc2"]
 all = ["pycryptodome", "Brotli", "blosc2"]
 
 [tool.poetry.dev-dependencies]
-pytest = "^6.2.5"
-pytest-codestyle = "^1.4.0"
-pytest-cov = "^2.8.1"
-pycodestyle = "^2.5.0"
+pytest = ">6.2.5"
+pytest-codestyle = ">1.4.0"
+pytest-cov = ">2.8.1"
+pycodestyle = ">2.5.0"
 sphinx = "^2.2.1"
-coveralls = "^1.8.2"
+coveralls = ">1.8.2"
 pyyaml = "^6.0.1"
-pytest-mypy = { version = "^0.8.1", markers = "platform_python_implementation != 'PyPy'" }
-types-PyYAML = "^5.4.3"
-typing-extensions = { version = "^3.10.0" }
-pytest-asyncio = "^0.19.0"
+pytest-mypy = { version = ">0.8.1", markers = "platform_python_implementation != 'PyPy'" }
+types-PyYAML = ">5.4.3"
+types-cachetools = "^5.3.0.5"
+types-ujson = "^5.5.0"
+typing-extensions = { version = ">3.10.0" }
+pytest-asyncio = ">0.19.0"
 
 [build-system]
 requires = ["poetry-core"]
