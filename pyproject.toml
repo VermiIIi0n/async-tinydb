@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.7.0"
+version = "1.7.1"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -108,7 +108,7 @@ pytest-cov = "^2.8.1"
 pycodestyle = "^2.5.0"
 sphinx = "^2.2.1"
 coveralls = "^1.8.2"
-pyyaml = "^5.1.2"
+pyyaml = "^6.0.1"
 pytest-mypy = { version = "^0.8.1", markers = "platform_python_implementation != 'PyPy'" }
 types-PyYAML = "^5.4.3"
 typing-extensions = { version = "^3.10.0" }
