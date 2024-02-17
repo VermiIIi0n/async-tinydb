@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "async-tinydb"
-version = "1.7.1"
+version = "1.7.2"
 description = "Yet Another Async TinyDB"
 authors = ["VermiIIi0n <dungeon.behind0t@icloud.com>", "Markus Siemens <markus@m-siemens.de>", ]
 license = "MIT"
@@ -90,11 +90,11 @@ ignore_errors = true
 [tool.poetry.dependencies]
 python = "^3.10"
 nest-asyncio = "^1.5.5"
-ujson = "^5.4.0"
+ujson = ">5.4.0"
 pycryptodome = {version = "^3.15.0", optional = true}
 Brotli = {version = "^1.0.9", optional = true}
 blosc2 = {version = "^0.4.1", optional = true}
-vermils = "^0.3.0"
+vermils = "^0.3.5"
 cachetools = "^5.3.0"
 
 [tool.poetry.extras]
@@ -111,9 +111,9 @@ sphinx = "^2.2.1"
 coveralls = ">1.8.2"
 pyyaml = "^6.0.1"
 pytest-mypy = { version = ">0.8.1", markers = "platform_python_implementation != 'PyPy'" }
-types-PyYAML = ">5.4.3"
+types-PyYAML = ">6.0.1"
 types-cachetools = "^5.3.0.5"
-types-ujson = "^5.5.0"
+types-ujson = ">5.5.0"
 typing-extensions = { version = ">3.10.0" }
 pytest-asyncio = ">0.19.0"
 
