@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Awaitable, Mapping, MutableMapping, TypeVar, cast
 from typing import TypeAlias
 import os
+import shutil
 from tempfile import NamedTemporaryFile
 import ujson as json
 from vermils.react import EventHook, ActionChain, EventHint, ActionCentipede
@@ -218,11 +219,10 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
                    await self._event_hook.aemit("write.pre", self, data))
         data = pre if pre is not None else data
         # Convert keys to strings
-        data = await self._sink.run(stringify_keys, data)
+        data = stringify_keys(data)
 
         # Serialize the database state using the user-provided arguments
-        task = self._sink.run(json.dumps, data or {}, **self.kwargs)
-        serialized: bytes | str = await task
+        serialized: bytes | str = json.dumps(data or {}, **self.kwargs)
 
         # Post-process the serialized data
         if 'b' in self._mode and isinstance(serialized, str):
@@ -267,7 +267,11 @@ class JSONStorage(StorageWithWriteReadPrePostHooks):
             f.close()
 
             # Use os.replace to ensure atomicity
-            os.replace(f.name, self._path)
+            try:
+                os.replace(f.name, self._path)
+            except OSError:
+                shutil.copy(f.name, self._path)
+                os.remove(f.name)
 
     def __del__(self):
         try:

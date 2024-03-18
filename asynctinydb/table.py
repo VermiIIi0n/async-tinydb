@@ -830,9 +830,9 @@ class Table(Generic[IDVar, DocVar]):
         if cache is not exist.
         """
 
-        lock = self._lock if block else asyncio.Lock()
-
-        async with lock:
+        try:
+            if block:
+                await self._lock.acquire()
             # If cache exists
             if self._cache is not None and not self._data_cache_clear_flag:
                 return self._cache
@@ -848,6 +848,10 @@ class Table(Generic[IDVar, DocVar]):
                 # Caching if no_dbcache is not set
                 self._cache = cooked
             return cooked
+
+        finally:
+            if block:
+                self._lock.release()
 
     def _cook(self, raw: Mapping[Any, Mapping]
               ) -> MutableMapping[IDVar, DocVar]:
@@ -897,7 +901,7 @@ class Table(Generic[IDVar, DocVar]):
         async with self._lock:
             tables: MutableMapping[Any, Mapping] = await self._storage.read() or {}
 
-            table = await self._read_table(False)
+            table = await self._read_table(block=False)
 
             # Perform the table update operation
             ret = updater(table)
@@ -914,7 +918,7 @@ class Table(Generic[IDVar, DocVar]):
                 raise
             finally:
                 # Clear the query cache, as the table contents have changed
-                self.clear_cache()
+                self._query_cache.clear()
 
 
 ###### Event Hints ######
