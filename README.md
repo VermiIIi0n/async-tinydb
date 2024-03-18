@@ -24,13 +24,13 @@ Unlike `TinyDB` which has a minimal core, `Async-TinyDB` is designed to have max
 
 * **Event Hooks**: You can now use event hooks to hook into an operation. See [Event Hooks](./docs/EventHooks.md) for more details.
 
-* **Redesigned ID & Doc Class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) more pleasingly.
+* **Redesigned ID & Doc Class**: You can [replace](#replacing-id-&-document-class) and [customise them](#customise-id-class) easily.
   
 * **DB-level Caching**: This significantly improves the performance of all operations. However, it may cause dirty reads with some types of storage [^disable-db-level]. 
 
 * **Built-in `Modifier`**: Use `Modifier` to easily [compress](./docs/Modifier.md#Compression),  [encrypt](#encryption) and [extend types](./docs/Modifier.md#Conversion) of your database. Sure you can do much more than these. _(See [Modifier](./docs/Modifier.md))_
 
-* **Isolation Level**: Performance or thread-safe or even ACID? It's up to you[^isolevel].
+* **Isolation Level**: Performance or ACID? It's up to you[^isolevel].
 
 * **Atomic Write**: Shipped with `JSONStorage`
 
