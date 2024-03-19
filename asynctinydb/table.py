@@ -6,17 +6,19 @@ data in TinyDB.
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from contextlib import suppress
+import inspect
 import uuid
 import json  # For pretty printing
+import asyncio
 from copy import deepcopy
-from typing import AsyncGenerator, Collection, MutableMapping
+from typing import AsyncGenerator, Collection, Coroutine, MutableMapping
 from typing import overload, Callable, Iterable
 from typing import Mapping, Generic, cast, TypeVar, Type, Any, ParamSpec
 from .queries import QueryLike, is_cacheable
 from vermils.react import EventHook, EventHint, ActionChain
 from .storages import Storage
 from .utils import LRUCache
-from vermils.asynctools import sync_await, AsinkRunner, async_run
+from vermils.asynctools import sync_await
 
 __all__ = ("Document", "Table", "IncreID")
 IDVar = TypeVar("IDVar", bound="BaseID")
@@ -129,6 +131,7 @@ class StrID(str, BaseID):
     @classmethod
     def clear_cache(cls, table: Table):
         ...
+
 
 class UUID(uuid.UUID, BaseID):
     """ID class using uuid4 UUIDs."""
@@ -261,7 +264,7 @@ class Table(Generic[IDVar, DocVar]):
         """Whether to disable the DB-level cache for this table."""
         self._storage = storage
         self._name = name
-        self._cache: MutableMapping[IDVar, DocVar] = None  # type: ignore[assignment]
+        self._cache: MutableMapping[IDVar, DocVar] | None = None
         """Cache for documents in this table."""
         self._query_cache: LRUCache[QueryLike, tuple[IDVar, ...]] \
             = self.query_cache_class(capacity=cache_size)
@@ -271,8 +274,9 @@ class Table(Generic[IDVar, DocVar]):
 
         self._isolevel = 0
         self._closed = False
-        self._sink = AsinkRunner()
-        """Serialise all operations on this table."""
+        self._lock = asyncio.Lock()
+        self._query_cache_clear_flag = False
+        self._data_cache_clear_flag = False
 
         self._event_hook = EventHook()
         """Hook for events."""
@@ -441,7 +445,7 @@ class Table(Generic[IDVar, DocVar]):
         """
 
         table = await self._read_table()
-        ret = await self._run_with_iso(self._search, cond, table, limit, doc_ids)
+        ret = self._search(cond, table, limit, doc_ids)
         return list(ret.values())
 
     async def get(
@@ -465,7 +469,7 @@ class Table(Generic[IDVar, DocVar]):
 
         table = await self._read_table()
         doc_ids = None if doc_id is None else (doc_id,)
-        ret = await self._run_with_iso(self._search, cond, table, 1, doc_ids)
+        ret = self._search(cond, table, 1, doc_ids)
         if ret:
             return ret.popitem()[1]
         return None
@@ -698,7 +702,6 @@ class Table(Generic[IDVar, DocVar]):
         if not self._closed:
             self.clear_cache()
             self.clear_data_cache()
-            await self._sink.aclose()
             self._closed = True
 
     def clear_cache(self) -> None:
@@ -708,9 +711,7 @@ class Table(Generic[IDVar, DocVar]):
         Scheduled to be executed immediately
         """
 
-        # Put function in execution queue and run with a higher priority
-        # This is to ensure thread safety
-        self._sink.sync_run_as(16, self._query_cache.clear).result()
+        self._query_cache_clear_flag = True
 
     def clear_data_cache(self):
         """
@@ -719,10 +720,7 @@ class Table(Generic[IDVar, DocVar]):
         Scheduled to be executed immediately
         """
 
-        def updater():
-            self._cache = None
-        # Put function in execution queue and run with a higher priority
-        self._sink.sync_run_as(16, updater).result()
+        self._data_cache_clear_flag = True
 
     def __len__(self):
         """
@@ -759,7 +757,6 @@ class Table(Generic[IDVar, DocVar]):
         """
         Clean up the table.
         """
-        self._sink.close()
 
     def _search(self, cond: QueryLike | None,
                 docs: MutableMapping[IDVar, DocVar],
@@ -771,6 +768,10 @@ class Table(Generic[IDVar, DocVar]):
         cacheable = cond is not None and is_cacheable(cond)
         cond = cast(QueryLike, cond)
         # Only cache cacheable queries, this value may alter.
+
+        if self._query_cache_clear_flag:
+            self._query_cache.clear()
+            self._query_cache_clear_flag = False
 
         # First, we check if the query has a cache
         cached_ids = self._query_cache.get(cond) if cacheable else None
@@ -823,25 +824,34 @@ class Table(Generic[IDVar, DocVar]):
 
         return deepcopy(docs) if self._isolevel >= 2 else docs.copy()
 
-    async def _read_table(self) -> MutableMapping[IDVar, DocVar]:
+    async def _read_table(self, block=True) -> MutableMapping[IDVar, DocVar]:
         """
         Read the table data from the underlying storage 
         if cache is not exist.
         """
 
-        # If cache exists
-        if self._cache is not None:
-            return self._cache
+        try:
+            if block:
+                await self._lock.acquire()
+            # If cache exists
+            if self._cache is not None and not self._data_cache_clear_flag:
+                return self._cache
 
-        # Read the table data from the underlying storage
-        raw = await self._read_raw_table()
-        cooked: dict[IDVar, DocVar] | None = None
+            self._data_cache_clear_flag = False
 
-        cooked = await self._run_with_iso(self._cook, raw)
-        if not self.no_dbcache:
-            # Caching if no_dbcache is not set
-            self._cache = cooked
-        return cooked
+            # Read the table data from the underlying storage
+            raw = await self._read_raw_table()
+            cooked = None
+
+            cooked = self._cook(raw)
+            if not self.no_dbcache:
+                # Caching if no_dbcache is not set
+                self._cache = cooked
+            return cooked
+
+        finally:
+            if block:
+                self._lock.release()
 
     def _cook(self, raw: Mapping[Any, Mapping]
               ) -> MutableMapping[IDVar, DocVar]:
@@ -872,7 +882,9 @@ class Table(Generic[IDVar, DocVar]):
         return tables.get(self.name, {})
 
     async def _update_table(self,
-                            updater: Callable[[MutableMapping[IDVar, DocVar]], None]):
+                            updater: Callable[
+                                [MutableMapping[IDVar, DocVar]],
+                                None | Coroutine[None, None, None]]):
         """
         Perform a table update operation.
 
@@ -886,31 +898,27 @@ class Table(Generic[IDVar, DocVar]):
         document class, as the table data will *not* be returned to the user.
         """
 
-        tables: MutableMapping[Any, Mapping] = await self._storage.read() or {}
+        async with self._lock:
+            tables: MutableMapping[Any, Mapping] = await self._storage.read() or {}
 
-        table = await self._read_table()
+            table = await self._read_table(block=False)
 
-        # Perform the table update operation
-        await self._run_with_iso(updater, table)
-        tables[self.name] = table
+            # Perform the table update operation
+            ret = updater(table)
+            if inspect.isawaitable(ret):
+                await ret
+            tables[self.name] = table
 
-        try:
-            # Write the newly updated data back to the storage
-            await self._storage.write(tables)
-        except BaseException:
-            # Writing failure, data cache is out of sync
-            self.clear_data_cache()
-            raise
-        finally:
-            # Clear the query cache, as the table contents have changed
-            self.clear_cache()
-
-    async def _run_with_iso(self, func: Callable[ARGS, V],
-                            *args: ARGS.args, **kwargs: ARGS.kwargs) -> V:
-        """Run sync function with isolation level"""
-        if self._isolevel:
-            return await self._sink.run(func, *args, **kwargs)
-        return await async_run(func, *args, **kwargs)
+            try:
+                # Write the newly updated data back to the storage
+                await self._storage.write(tables)
+            except BaseException:
+                # Writing failure, data cache is out of sync
+                self.clear_data_cache()
+                raise
+            finally:
+                # Clear the query cache, as the table contents have changed
+                self._query_cache.clear()
 
 
 ###### Event Hints ######
