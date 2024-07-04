@@ -17,7 +17,7 @@ False
 """
 from __future__ import annotations
 import re
-from typing import Container, Iterable, Mapping, Callable, Any
+from typing import Container, Iterable, Mapping, Callable, Any, NoReturn
 from typing import Protocol
 from contextlib import suppress
 from warnings import warn
@@ -159,6 +159,9 @@ class QueryInstance:
         frame = ("not", self._frame)
         cache = self.cacheable
         return QueryInstance(lambda value: not self(value), frame, cache)
+
+    def __bool__(self) -> NoReturn:
+        raise NotImplementedError("QueryInstance cannot be used in boolean ")
 
 
 class Query(QueryInstance):
